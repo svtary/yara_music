@@ -1,0 +1,19 @@
+{
+  "name": "@yara/catalog-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "ingest": "node dist/ingest.js",
+    "rebuild-search": "node dist/rebuild-search.js"
+  },
+  "dependencies": {
+    "@yara/adapters-musicbrainz": "workspace:*",
+    "@yara/adapters-postgres": "workspace:*",
+    "@yara/application": "workspace:*",
+    "@yara/config": "workspace:*",
+    "@yara/domain-catalog": "workspace:*"
+  }
+}

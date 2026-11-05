@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { readApiConfig, readWebConfig, readWorkerConfig } from './index.js';
+import {
+  readApiConfig,
+  readCatalogProviderConfig,
+  readWebConfig,
+  readWorkerConfig,
+} from './index.js';
 
 const databaseUrl = 'postgresql://yara:password@localhost:5432/yara';
 
@@ -21,9 +26,16 @@ describe('typed environment configuration', () => {
     expect(readWebConfig({ API_INTERNAL_BASE_URL: 'http://api:4000' }).apiInternalBaseUrl).toBe(
       'http://api:4000',
     );
+    expect(readCatalogProviderConfig({})).toMatchObject({
+      musicBrainzBaseUrl: 'https://musicbrainz.org/ws/2/',
+      musicBrainzRequestIntervalMs: 1_000,
+      musicBrainzMaxRetries: 2,
+      coverArtArchiveBaseUrl: 'https://coverartarchive.org/',
+    });
   });
 
   it('rejects invalid critical values', () => {
     expect(() => readApiConfig({ DATABASE_URL: 'not-a-url', API_PORT: '0' })).toThrow();
+    expect(() => readCatalogProviderConfig({ MUSICBRAINZ_REQUEST_INTERVAL_MS: '999' })).toThrow();
   });
 });

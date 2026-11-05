@@ -1,3 +1,4 @@
+import type { AlbumContextSummary, ArtistSummary } from '@yara/application';
 import type { CatalogEntityKind, ProviderMappingStatus } from '@yara/domain-catalog';
 
 export interface CatalogArtistTable {
@@ -68,6 +69,22 @@ export interface CatalogProviderMappingCandidateTable {
   candidate_recording_id: string | null;
 }
 
+export interface CatalogSearchDocumentTable {
+  kind: CatalogEntityKind;
+  canonical_id: string;
+  display_title: string;
+  artists: readonly ArtistSummary[];
+  original_release_year: number | null;
+  image_url: string | null;
+  image_provider: string | null;
+  image_source_ref: string | null;
+  duration_ms: number | null;
+  album_context: AlbumContextSummary | null;
+  searchable_text: string;
+  projection_version: number;
+  updated_at: Date;
+}
+
 /** Kysely row types remain adapter-local and never become Domain entities. */
 export interface YaraDatabase {
   'catalog.artists': CatalogArtistTable;
@@ -78,4 +95,5 @@ export interface YaraDatabase {
   'catalog.recording_artists': CatalogRecordingArtistTable;
   'catalog.provider_mappings': CatalogProviderMappingTable;
   'catalog.provider_mapping_candidates': CatalogProviderMappingCandidateTable;
+  'search.catalog_documents': CatalogSearchDocumentTable;
 }

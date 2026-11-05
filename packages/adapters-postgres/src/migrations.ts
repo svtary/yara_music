@@ -523,8 +523,81 @@ const catalogAlbumMetadataMigration: Migration = {
   },
 };
 
+const catalogSearchProjectionMigration: Migration = {
+  async up(database): Promise<void> {
+    await sql`
+      create schema if not exists search;
+
+      create table search.catalog_documents (
+        kind text not null,
+        canonical_id text not null,
+        display_title text not null,
+        artists jsonb not null default '[]'::jsonb,
+        original_release_year integer,
+        image_url text,
+        image_provider text,
+        image_source_ref text,
+        duration_ms integer,
+        album_context jsonb,
+        searchable_text text not null,
+        search_vector tsvector generated always as (
+          to_tsvector('simple', searchable_text)
+        ) stored,
+        projection_version integer not null default 1,
+        updated_at timestamptz not null default now(),
+        primary key (kind, canonical_id),
+        constraint search_catalog_documents_kind_valid check (
+          kind in ('artist', 'album', 'recording')
+        ),
+        constraint search_catalog_documents_id_valid check (
+          length(canonical_id) between 1 and 256
+          and canonical_id !~ '[[:space:][:cntrl:]]'
+        ),
+        constraint search_catalog_documents_title_valid check (
+          length(display_title) > 0
+          and display_title = btrim(display_title)
+          and display_title !~ '[[:cntrl:]]'
+        ),
+        constraint search_catalog_documents_artists_valid check (
+          jsonb_typeof(artists) = 'array'
+        ),
+        constraint search_catalog_documents_image_valid check (
+          (
+            image_url is null
+            and image_provider is null
+            and image_source_ref is null
+          )
+          or (
+            image_url ~ '^https?://'
+            and (
+              (image_provider is null and image_source_ref is null)
+              or (image_provider is not null and image_source_ref is not null)
+            )
+          )
+        ),
+        constraint search_catalog_documents_projection_version_valid check (
+          projection_version > 0
+        )
+      );
+
+      create index search_catalog_documents_fts
+        on search.catalog_documents using gin (search_vector);
+      create index search_catalog_documents_title_trgm
+        on search.catalog_documents using gin (lower(display_title) gin_trgm_ops);
+      create index search_catalog_documents_stable_order
+        on search.catalog_documents (kind, lower(display_title), canonical_id);
+    `.execute(database);
+  },
+  async down(database): Promise<void> {
+    await sql`drop schema if exists search cascade`.execute(database);
+  },
+};
+
 export type YaraMigrationName =
-  '0001_stage_zero_extensions' | '0002_catalog_foundation' | '0003_catalog_album_metadata';
+  | '0001_stage_zero_extensions'
+  | '0002_catalog_foundation'
+  | '0003_catalog_album_metadata'
+  | '0004_catalog_search_projection';
 
 function createYaraMigrator(database: Kysely<YaraDatabase>): Migrator {
   return new Migrator({
@@ -535,6 +608,7 @@ function createYaraMigrator(database: Kysely<YaraDatabase>): Migrator {
           '0001_stage_zero_extensions': stageZeroExtensionsMigration,
           '0002_catalog_foundation': catalogFoundationMigration,
           '0003_catalog_album_metadata': catalogAlbumMetadataMigration,
+          '0004_catalog_search_projection': catalogSearchProjectionMigration,
         };
       },
     },

@@ -54,6 +54,180 @@
           "health"
         ]
       }
+    },
+    "/search": {
+      "get": {
+        "operationId": "SearchController_search",
+        "parameters": [
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "artist",
+                "album",
+                "recording"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "q",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 120,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/ArtistSearchResultDto"
+                      },
+                      {
+                        "$ref": "#/components/schemas/AlbumSearchResultDto"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecordingSearchResultDto"
+                      }
+                    ],
+                    "discriminator": {
+                      "propertyName": "kind"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Search the local Yara Catalog projection",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/artists/{id}": {
+      "get": {
+        "operationId": "CatalogController_artist",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtistDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Artist not found"
+          }
+        },
+        "summary": "Read canonical Artist detail",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/albums/{id}": {
+      "get": {
+        "operationId": "CatalogController_album",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Album not found"
+          }
+        },
+        "summary": "Read canonical Album detail with ordered recordings",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/recordings/{id}": {
+      "get": {
+        "operationId": "CatalogController_recording",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recording not found"
+          }
+        },
+        "summary": "Read canonical Recording detail and Album contexts",
+        "tags": [
+          "catalog"
+        ]
+      }
     }
   },
   "info": {
@@ -101,6 +275,294 @@
           "status",
           "version",
           "timestamp"
+        ]
+      },
+      "CatalogImageDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "sourceRef": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "ArtistSearchResultDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "artist"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "image": {
+            "$ref": "#/components/schemas/CatalogImageDto"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "name"
+        ]
+      },
+      "ArtistSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "AlbumSearchResultDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "album"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtistSummaryDto"
+            }
+          },
+          "originalReleaseYear": {
+            "type": "number"
+          },
+          "cover": {
+            "$ref": "#/components/schemas/CatalogImageDto"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "title",
+          "artists"
+        ]
+      },
+      "AlbumContextSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "cover": {
+            "$ref": "#/components/schemas/CatalogImageDto"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ]
+      },
+      "RecordingSearchResultDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "recording"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtistSummaryDto"
+            }
+          },
+          "durationMs": {
+            "type": "number"
+          },
+          "albumContext": {
+            "$ref": "#/components/schemas/AlbumContextSummaryDto"
+          },
+          "artwork": {
+            "$ref": "#/components/schemas/CatalogImageDto"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "title",
+          "artists"
+        ]
+      },
+      "ArtistDetailDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "artist"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "canonicalName": {
+            "type": "string"
+          },
+          "image": {
+            "$ref": "#/components/schemas/CatalogImageDto"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "canonicalName"
+        ]
+      },
+      "RecordingDetailSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtistSummaryDto"
+            }
+          },
+          "durationMs": {
+            "type": "number"
+          },
+          "position": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "artists",
+          "position"
+        ]
+      },
+      "AlbumDetailDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "album"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtistSummaryDto"
+            }
+          },
+          "originalReleaseYear": {
+            "type": "number"
+          },
+          "cover": {
+            "$ref": "#/components/schemas/CatalogImageDto"
+          },
+          "trackCount": {
+            "type": "number"
+          },
+          "recordings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordingDetailSummaryDto"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "title",
+          "artists",
+          "trackCount",
+          "recordings"
+        ]
+      },
+      "RecordingDetailDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "recording"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtistSummaryDto"
+            }
+          },
+          "durationMs": {
+            "type": "number"
+          },
+          "albumContexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlbumContextSummaryDto"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "title",
+          "artists",
+          "albumContexts"
         ]
       }
     }
