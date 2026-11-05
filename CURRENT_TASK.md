@@ -1,0 +1,1 @@
+docs/project/CURRENT_TASK.md

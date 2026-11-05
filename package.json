@@ -1,0 +1,44 @@
+{
+  "name": "yara",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24 <27",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @yara/web --filter @yara/api --filter @yara/worker dev",
+    "dev:web": "pnpm --filter @yara/web dev",
+    "dev:api": "pnpm --filter @yara/api dev",
+    "dev:worker": "pnpm --filter @yara/worker dev",
+    "build": "pnpm run build:packages && pnpm --filter @yara/api build && pnpm --filter @yara/worker build && pnpm --filter @yara/web build",
+    "build:packages": "pnpm --filter './packages/**' --sort run build",
+    "lint": "eslint apps packages scripts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm run build:packages && pnpm --filter './packages/**' --sort run typecheck && pnpm --filter './apps/**' --sort run typecheck",
+    "test": "vitest run",
+    "test:integration": "YARA_RUN_POSTGRES_INTEGRATION=1 vitest run packages/adapters-postgres/src/catalog-query-adapter.integration.test.ts",
+    "test:watch": "vitest",
+    "check:architecture": "node scripts/check-architecture.mjs",
+    "check:context": "node scripts/check-context.mjs",
+    "openapi:generate": "pnpm run build:packages && pnpm --filter @yara/api build && pnpm --filter @yara/api openapi:generate",
+    "db:migrate": "pnpm run build:packages && pnpm --filter @yara/adapters-postgres migrate",
+    "db:seed": "pnpm run build:packages && pnpm --filter @yara/adapters-postgres seed",
+    "verify": "pnpm format:check && pnpm lint && pnpm check:context && pnpm check:architecture && pnpm typecheck && pnpm test && pnpm build && pnpm openapi:generate"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "@vitest/coverage-v8": "5.0.5",
+    "eslint": "10.14.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "6.0.2",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.0.5"
+  }
+}

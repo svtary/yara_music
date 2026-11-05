@@ -1,0 +1,211 @@
+# ============================================================
+# Yara — .gitignore
+# ============================================================
+
+
+# ------------------------------------------------------------
+# Dependencies / package manager cache
+# ------------------------------------------------------------
+
+node_modules/
+.pnpm-store/
+.pnp/
+.pnp.js
+
+
+# ------------------------------------------------------------
+# Build outputs
+# ------------------------------------------------------------
+
+dist/
+build/
+out/
+
+.next/
+.turbo/
+.vercel/
+
+coverage/
+
+
+# ------------------------------------------------------------
+# Runtime / temporary files
+# ------------------------------------------------------------
+
+tmp/
+temp/
+.cache/
+*.tmp
+*.temp
+*.log
+
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+# ------------------------------------------------------------
+# Environment / secrets
+# ------------------------------------------------------------
+
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Keep the documented environment template
+!.env.example
+
+
+# ------------------------------------------------------------
+# OS files
+# ------------------------------------------------------------
+
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+
+# ------------------------------------------------------------
+# Editors / IDE
+# ------------------------------------------------------------
+
+.idea/
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+*.swp
+*.swo
+*~
+
+
+# ------------------------------------------------------------
+# TypeScript / tooling caches
+# ------------------------------------------------------------
+
+*.tsbuildinfo
+
+.eslintcache
+.prettier-cache
+
+.vitest/
+.nyc_output/
+
+
+# ------------------------------------------------------------
+# Docker / local runtime
+# ------------------------------------------------------------
+
+docker-data/
+.postgres-data/
+postgres-data/
+
+
+# ------------------------------------------------------------
+# Local Codex / AI tool runtime artifacts
+# ------------------------------------------------------------
+# Do NOT ignore the whole .codex directory by default because
+# project-level agent rules/config may belong in Git.
+#
+# Only ignore clearly machine-local/runtime content.
+
+.codex/cache/
+.codex/tmp/
+.codex/logs/
+.codex/sessions/
+
+
+# ------------------------------------------------------------
+# Generated / local artifacts
+# ------------------------------------------------------------
+
+*.pid
+*.pid.lock
+
+*.local
+*.bak
+*.backup
+
+
+# ------------------------------------------------------------
+# Legacy documentation migration leftovers
+# ------------------------------------------------------------
+#
+# Canonical documentation now lives under docs/.
+#
+# DO NOT ignore:
+#   docs/
+#   docs/INDEX.md
+#   docs/project/
+#   docs/product/
+#   docs/technical/
+#   AGENTS.md
+#   PLANS.md
+#   CURRENT_TASK.md
+#
+# Ignore only directories/files explicitly marked as old,
+# migrated, archived, backup, copy, or temporary.
+
+legacy/
+legacy-docs/
+docs-legacy/
+docs_old/
+docs-old/
+
+docs/legacy/
+docs/_legacy/
+docs/archive/
+docs/_archive/
+docs/migration-backup/
+docs/_migration/
+
+*_legacy.md
+*.legacy.md
+*_old.md
+*.old.md
+
+*_backup.md
+*.backup.md
+*_bak.md
+
+* copy.md
+* Copy.md
+* 副本.md
+
+# Common editor/manual migration leftovers
+*.md~
+*.md.bak
+*.md.backup
+
+
+# ------------------------------------------------------------
+# macOS / Finder aliases and miscellaneous local shortcuts
+# ------------------------------------------------------------
+
+*.alias
+
+
+# ------------------------------------------------------------
+# IMPORTANT: intentionally tracked Yara project context
+# ------------------------------------------------------------
+#
+# Do NOT add the following to ignore without verifying first:
+#
+# YARA_MASTER_CONTEXT.md
+# DECISIONS.md
+# baselines/
+# execution/
+# reference/
+# assets/
+#
+# These may still be referenced by context-integrity checks
+# or canonical project documentation.

@@ -1,0 +1,26 @@
+{
+  "runId": "yara-desktop-highfi-v1",
+  "phase": "complete",
+  "step": "cross-platform-freeze-approved",
+  "fileKey": "UjYCKnl6PesRNdywSf8o2n",
+  "entities": {
+    "pages": {
+      "home": "309:12",
+      "explore": "309:13",
+      "yara": "309:14",
+      "community": "309:15",
+      "me": "309:16",
+      "player": "309:17"
+    },
+    "components": {
+      "navigationRail": "311:1474",
+      "persistentPlayer": "312:1374",
+      "pageHeader": "312:5331",
+      "contextPanel": "312:5337",
+      "shell": "312:5541"
+    },
+    "frames": {}
+  },
+  "completedSteps": ["phase0", "phase1", "phase2", "phase3", "desktop-production", "desktop-prototype", "phase4"],
+  "pendingValidations": []
+}

@@ -1,0 +1,29 @@
+import { describe, expect, it } from 'vitest';
+
+import { readApiConfig, readWebConfig, readWorkerConfig } from './index.js';
+
+const databaseUrl = 'postgresql://yara:password@localhost:5432/yara';
+
+describe('typed environment configuration', () => {
+  it('applies safe Stage 0 defaults', () => {
+    expect(readApiConfig({ DATABASE_URL: databaseUrl })).toMatchObject({
+      nodeEnv: 'development',
+      host: '0.0.0.0',
+      port: 4000,
+      logLevel: 'info',
+    });
+    expect(readWorkerConfig({ DATABASE_URL: databaseUrl }).healthPort).toBe(4001);
+    expect(readWebConfig({})).toMatchObject({
+      nodeEnv: 'development',
+      apiBaseUrl: 'http://localhost:4000',
+      apiInternalBaseUrl: 'http://localhost:4000',
+    });
+    expect(readWebConfig({ API_INTERNAL_BASE_URL: 'http://api:4000' }).apiInternalBaseUrl).toBe(
+      'http://api:4000',
+    );
+  });
+
+  it('rejects invalid critical values', () => {
+    expect(() => readApiConfig({ DATABASE_URL: 'not-a-url', API_PORT: '0' })).toThrow();
+  });
+});

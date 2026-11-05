@@ -1,0 +1,1 @@
+docs/product/YARA_MASTER_CONTEXT.md

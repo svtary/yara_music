@@ -1,0 +1,32 @@
+{
+  "name": "@yara/adapters-postgres",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./catalog": {
+      "types": "./dist/catalog.d.ts",
+      "default": "./dist/catalog.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "migrate": "node dist/migrate.js",
+    "seed": "node dist/seed.js"
+  },
+  "dependencies": {
+    "@yara/application": "workspace:*",
+    "@yara/config": "workspace:*",
+    "@yara/domain-catalog": "workspace:*",
+    "kysely": "0.29.8",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@yara/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@yara/adapters-postgres": "workspace:*",
+    "@yara/config": "workspace:*",
+    "@yara/contracts": "workspace:*"
+  }
+}

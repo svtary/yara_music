@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg18-bookworm
+        env:
+          POSTGRES_DB: yara
+          POSTGRES_USER: yara
+          POSTGRES_PASSWORD: yara_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U yara -d yara"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    env:
+      NODE_ENV: test
+      API_HOST: 127.0.0.1
+      API_PORT: 4000
+      WORKER_HEALTH_PORT: 4001
+      WEB_PORT: 3000
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:4000
+      DATABASE_URL: postgresql://yara:yara_ci_only@127.0.0.1:5432/yara
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.2
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm test:integration
+      - run: pnpm verify
+      - name: API and Web smoke
+        shell: bash
+        run: |
+          pnpm --filter @yara/api start > /tmp/yara-api.log 2>&1 &
+          API_PID=$!
+          pnpm --filter @yara/web start > /tmp/yara-web.log 2>&1 &
+          WEB_PID=$!
+          trap 'kill $API_PID $WEB_PID 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4000/health/ready >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4000/health/ready
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3000 >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3000
