@@ -4,25 +4,25 @@ This file tracks implementation progress. It does not create or modify architect
 
 ## Roadmap
 
-| Stage | Scope                                                                                     | Status                                   |
-| ----- | ----------------------------------------------------------------------------------------- | ---------------------------------------- |
-| 0     | Repository foundation: monorepo boundaries, contracts, local PostgreSQL/Compose, CI smoke | **ACCEPTED**                             |
-| 1     | Identity, Catalog, canonical mapping, Search, Detail, UI                                  | **IN PROGRESS** — Tasks 1.1–1.4 accepted |
-| 2     | Yara Conversation, Task/Run separation, SSE, model adapter                                | Not started                              |
-| 3     | Knowledge, Hybrid Retrieval, Evidence Package, citations                                  | Not started                              |
-| 4     | Typed Tools, StructuredResult lifecycle, clarification, idempotent save                   | Not started                              |
-| 5     | Collection, explicit Taste, grounded Recommendation                                       | Not started                              |
-| 6     | Bounded Memory, Why This, Edit, Forget propagation                                        | Not started                              |
-| 7     | Evaluation, security, privacy, reliability hard gates                                     | Not started                              |
-| 8     | Staging, canary, migration/restore rehearsal, operational evidence                        | Not started                              |
+| Stage | Scope                                                                                     | Status                           |
+| ----- | ----------------------------------------------------------------------------------------- | -------------------------------- |
+| 0     | Repository foundation: monorepo boundaries, contracts, local PostgreSQL/Compose, CI smoke | **ACCEPTED**                     |
+| 1     | Identity, Catalog, canonical mapping, Search, Detail, UI                                  | **ACCEPTED** — Task 1.5 complete |
+| 2     | Conversation / SSE / Model Adapter                                                        | Not started                      |
+| 3     | Knowledge, Hybrid Retrieval, Evidence Package, citations                                  | Not started                      |
+| 4     | Typed Tools, StructuredResult lifecycle, clarification, idempotent save                   | Not started                      |
+| 5     | Collection, explicit Taste, grounded Recommendation                                       | Not started                      |
+| 6     | Bounded Memory, Why This, Edit, Forget propagation                                        | Not started                      |
+| 7     | Evaluation, security, privacy, reliability hard gates                                     | Not started                      |
+| 8     | Staging, canary, migration/restore rehearsal, operational evidence                        | Not started                      |
 
 ## Current stage
 
-**Stage 1 — Identity + Catalog + Search + Detail UI**
+**STAGE 1 — ACCEPTED**
 
 ## Current task
 
-**Tasks 1.3.5 + 1.4 — External Catalog Provider Integration + Search Backend** are implemented, verified, and accepted. Stop; do not begin Task 1.5 automatically.
+No active implementation task. Task 1.5 and Stage 1 are complete and accepted. Stop; do not begin Stage 2 automatically.
 
 ## Completed tasks
 
@@ -73,16 +73,20 @@ This file tracks implementation progress. It does not create or modify architect
 - Preserved deterministic Catalog fixtures and proved they remain searchable. Isolated PostgreSQL tests cover migration, rebuild determinism, ranking, detail assembly, repeated provider ingest, canonical/provider identity separation, and aggregate rollback.
 - Executed a real paced MusicBrainz/Cover Art Archive smoke: imported Radiohead, the OK Computer release-group, and its 12 representative recordings. The same Airbag Recording was directly re-ingested and reused its existing Yara canonical ID; Docker Search and Detail returned the imported data.
 - Regenerated OpenAPI with the typed Search result union and three Detail schemas; CI now seeds fixtures, rebuilds Search, and smokes all new routes without external network access.
+- Added shared Catalog transport contracts and a bounded Web API client with runtime shape validation. Browser reads remain behind narrow Next Route Handler BFF proxies; Web does not import Domain, adapters, provider payloads, or database rows.
+- Added responsive `/explore`, `/artists/[id]`, `/albums/[id]`, and `/recordings/[id]` product routes. Search uses URL query state, a 320 ms debounce, TanStack Query cancellation/placeholder data, and intentional Track/Album/Artist presentations.
+- Added real-data Artist, Album, and Recording Detail surfaces, including authoritative Album track order, cross-object canonical navigation, duration formatting, missing-image fallback, and distinct loading/idle/empty/error/not-found states.
+- Fixed and regression-tested the canonical route boundary discovered during runtime verification: encoded Next path parameters are decoded once at ingress and encoded once for each outbound path, so IDs such as `album:yara:<uuid>` are never double-encoded.
+- Verified the complete Docker/browser journey with imported MusicBrainz data: Radiohead Search, real OK Computer Album with 12 ordered recordings, Airbag Recording, Artist Detail, browser Back/query restoration, no-results, 404, desktop, and 393 px responsive behavior.
+- Task 1.5 — Search + Detail Frontend completed Stage 1 and was accepted after repository and runtime verification.
 
 ## Next tasks
 
-- Review Tasks 1.3.5 + 1.4 implementation evidence.
-- After approval only, consider Task 1.5 — Search + Detail Frontend.
-- Run the GitHub Actions workflow after the directory is initialized/pushed as a Git repository.
+- **Stage 2 — Conversation / SSE / Model Adapter**. Not started; begin only after explicit approval.
 
 ## Blockers
 
-- No Task 1.3.5 / Task 1.4 implementation blocker.
+- No Stage 1 implementation blocker.
 - Local shell reports Node.js 22, while the canonical container runtime is Node.js 24.22.2. Host verification and the passed Node 24 container build/runtime verification remain explicitly distinguished.
 - The repository is on branch `feat/musicbrainz-catalog-adapter` with remote `origin`; GitHub Actions was not run from this local implementation turn.
 
@@ -93,10 +97,10 @@ This file tracks implementation progress. It does not create or modify architect
 | Dependency install            | Passed  | Frozen lockfile install completed in Docker; 18 workspaces                           |
 | Format check                  | Passed  | `pnpm verify` → Prettier check passed                                                |
 | Lint                          | Passed  | `pnpm verify` → ESLint passed                                                        |
-| Architecture dependency check | Passed  | 77 source files scanned; Domain/Application boundaries remain framework-free         |
+| Architecture dependency check | Passed  | 105 source files scanned; Domain/Application boundaries remain framework-free        |
 | Context integrity check       | Passed  | 11 canonical files, seven baselines, and seven compatibility aliases verified        |
 | Typecheck                     | Passed  | 13 packages + 4 apps                                                                 |
-| Tests                         | Passed  | Deterministic: 9 files / 33 tests; PostgreSQL integration: 2 files / 12 tests        |
+| Tests                         | Passed  | Unit/default: 10 files / 45 tests; PostgreSQL integration: 2 files / 12 tests        |
 | Build                         | Passed  | Packages, Catalog CLI, API, Worker, and Next.js 16.4.3 production build              |
 | OpenAPI generation            | Passed  | Health, typed `/search`, and Artist/Album/Recording Detail paths generated           |
 | Docker Compose build/startup  | Passed  | Node 24 images rebuilt; PostgreSQL, API, Worker, and Web started successfully        |
@@ -106,7 +110,7 @@ This file tracks implementation progress. It does not create or modify architect
 | Web API proxy                 | Passed  | `GET http://127.0.0.1:3000/api/health/ready` returned canonical API readiness        |
 | Web production runtime        | Passed  | Docker Web and local standalone launcher served CSS/JS assets and hydrated queries   |
 | SSR / refresh / hydration     | Passed  | Ant SSR styles present; refresh retained styles; browser console had no warnings     |
-| Responsive smoke              | Passed  | 393×724: one-column grids, no horizontal overflow, all three status cards available  |
+| Responsive smoke              | Passed  | 393 px Catalog UI: mobile nav, stable cards, no horizontal overflow                  |
 | Catalog type safety           | Passed  | Artist/Album/Recording/provider IDs are nominally distinct                           |
 | Catalog mapping invariants    | Passed  | external taxonomy separated; ref/candidate kinds and cardinality enforced            |
 | Catalog migration             | Passed  | existing 0002 and fresh DB reached 0004; data/history preserved; repeat was no-op    |
@@ -119,4 +123,9 @@ This file tracks implementation progress. It does not create or modify architect
 | Catalog Detail APIs           | Passed  | Artist/Album/Recording, ordered tracklist, contexts, 404, no row/payload leakage     |
 | Real Provider smoke           | Passed  | Radiohead → OK Computer → 12 recordings; CAA cover; Airbag idempotent re-ingest      |
 | Docker Search/Detail runtime  | Passed  | Node 24 API served imported Airbag Search/Detail; API/Worker healthy; Web 200        |
+| Frontend behavior tests       | Passed  | 1 file / 12 tests: states, union groups, API boundary, IDs, Detail, order, duration  |
+| Search/Detail Web routes      | Passed  | `/explore` and canonical Artist/Album/Recording routes built and served              |
+| Browser vertical slice        | Passed  | Radiohead → OK Computer → Airbag → Back restored `?q=Radiohead`                      |
+| Frontend state handling       | Passed  | Idle, loading logic, no-results, transport error logic, malformed response, 404      |
+| Responsive Catalog UI         | Passed  | Desktop rail and 393 px mobile nav; no horizontal overflow; console clean            |
 | GitHub Actions                | Not run | Workflow updated; no remote Actions run was triggered in this local turn             |

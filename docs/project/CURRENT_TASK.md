@@ -3,9 +3,17 @@
 The former Figma execution task is complete and superseded.
 
 Current phase: **MVP-0 Implementation**  
-Current stage: **Stage 1 — Identity + Catalog + Search + Detail UI**  
-Current task: **Tasks 1.3.5 + 1.4 — External Catalog Provider Integration + Search Backend**
+Current status: **STAGE 1 — ACCEPTED**
 
-Stage 0 and Tasks 1.1–1.4 are **ACCEPTED**. Catalog now supports controlled MusicBrainz/Cover Art Archive ingestion, migration `0004_catalog_search_projection`, local PostgreSQL lexical Search, and typed Artist/Album/Recording Detail APIs. Do not begin Task 1.5 or frontend implementation automatically.
+Completed in Stage 1:
+
+- External Catalog Provider Integration
+- Search Backend
+- Search + Detail Frontend
+
+The complete user-facing Catalog slice now runs through responsive Explore/Search, the Next BFF, typed Search results, canonical-ID navigation, and real Artist/Album/Recording Detail APIs. Album track order, URL query restoration, image fallback, async/error/not-found states, and runtime canonical IDs are verified.
+
+Next stage: **Stage 2 — Conversation / SSE / Model Adapter**
+Status: **Not started**. Do not begin Stage 2 automatically.
 
 Use `PLANS.md` for detailed progress, blockers, and verification evidence. Use `docs/technical/Yara-Technical-Design.md` and Accepted ADRs for architecture. Use the approved Figma Product Design System as the visual and interaction source of truth. This file is only a compatibility pointer for agents that still inspect the legacy task path.

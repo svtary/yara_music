@@ -12,8 +12,9 @@ export function LoadingState({ label = 'Loading' }: Readonly<{ label?: string }>
 
 export function ErrorState({
   description,
+  title = 'Something went quiet',
   onRetry,
-}: Readonly<{ description: string; onRetry?: () => void }>) {
+}: Readonly<{ description: string; title?: string; onRetry?: () => void }>) {
   return (
     <Alert
       action={
@@ -24,7 +25,7 @@ export function ErrorState({
         ) : undefined
       }
       description={description}
-      message="Unable to load status"
+      message={title}
       showIcon
       type="warning"
     />
