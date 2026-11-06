@@ -131,6 +131,7 @@ describePostgres('PostgreSQL Catalog persistence', () => {
       '0001_stage_zero_extensions',
       '0002_catalog_foundation',
       '0003_catalog_album_metadata',
+      '0004_catalog_search_projection',
     ]);
 
     await seedCatalogFixtures(database);

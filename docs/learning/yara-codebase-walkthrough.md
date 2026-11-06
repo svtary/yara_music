@@ -2,7 +2,7 @@
 
 > 定位：这是当前仓库的学习地图，解释 **How this codebase actually works**。它不是新的 Architecture Specification；发生冲突时，`docs/technical/Yara-Technical-Design.md`、Accepted ADR 与冻结产品文档仍具有更高优先级。
 >
-> 当前代码状态：Stage 0、Tasks 1.1–1.3.2 已验收；Catalog 使用 Artist/Album/Recording semantics，Search/Provider Adapter 尚未开始。
+> 当前代码状态：Stage 0 与 Stage 1 已实现；Catalog 使用 Artist/Album/Recording semantics，MusicBrainz/Cover Art Archive ingestion、PostgreSQL Search projection、Catalog Detail API，以及响应式 Explore/Search + Detail Web vertical slice 已落地。
 
 ## 1. 先看全局：运行中的系统与代码中的边界
 
@@ -52,9 +52,9 @@ Adapter（实现 Port；PostgreSQL、外部 Provider 等）
 ### 1.2 Domain、Application、Port、Adapter
 
 - **Domain**：回答“什么是合法的 Catalog 对象/映射”。例如 Provider 的 `release-group` identity 可以映射到 AlbumRef，但不能因 external type 相同或相近就自动取得 canonical authority。
-- **Application**：回答“一个用户意图需要按什么顺序调用哪些 Domain 能力”。当前仅有最小 `CatalogQueryPort`，还没有 Catalog use case。
+- **Application**：回答“一个用户意图需要按什么顺序调用哪些 Domain 能力”。当前已有 Catalog ingestion、Search 与 Detail query use cases 及其 typed ports。
 - **Port**：内层声明自己需要什么能力的 TypeScript interface。例如 `CatalogQueryPort` 只描述按 canonical ID 查询和解析 provider identity。
-- **Adapter**：外层对 Port 的技术实现。例如未来 PostgreSQL Catalog Adapter 会用 Kysely 实现 `CatalogQueryPort`。
+- **Adapter**：外层对 Port 的技术实现。当前 PostgreSQL Catalog/Search adapters 使用 Kysely 实现 Application ports，MusicBrainz adapter 负责 Provider ACL 与 normalization。
 
 这就是 Dependency Inversion：Application 依赖自己需要的 interface，而不是直接依赖 Kysely。它类似前端把 `Storage` interface 注入业务服务，而不是在业务规则中直接调用 `localStorage`，但边界更严格。
 
@@ -71,12 +71,14 @@ Web 不直接操作 PostgreSQL，因为浏览器不能安全持有数据库凭�
 ├── apps/
 │   ├── web/                  # Next.js App Router Web/BFF
 │   ├── api/                  # NestJS + Fastify HTTP API
-│   └── worker/               # 独立后台进程（当前仅 health skeleton）
+│   ├── worker/               # 独立后台进程（当前仅 health skeleton）
+│   └── catalog-cli/          # 受控 Provider ingestion / projection rebuild entry point
 ├── packages/
-│   ├── contracts/            # 跨 transport 的显式 contract（当前为 health）
+│   ├── contracts/            # Health + Catalog 跨 transport contract / OpenAPI
 │   ├── config/               # Zod typed environment config
-│   ├── application/          # Application boundary；当前含 CatalogQueryPort
+│   ├── application/          # Catalog ingestion / Search / Detail use cases 与 ports
 │   ├── adapters-postgres/    # Kysely/pg、迁移与 PostgreSQL probe
+│   ├── adapters-musicbrainz/ # Provider HTTP/DTO/normalization ACL
 │   ├── ai-runtime/           # 非权威 AI execution boundary skeleton
 │   ├── domain-catalog/       # 当前真实实现的 Catalog Domain
 │   ├── domain-identity/      # 仅 owner boundary skeleton
@@ -99,23 +101,25 @@ Web 不直接操作 PostgreSQL，因为浏览器不能安全持有数据库凭�
 
 ### 2.1 Runtime Apps
 
-| App           | 进程与启动者                                                | 主要依赖                                                | 当前能做什么                                   | 不能做什么                                                       |
-| ------------- | ----------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
-| `apps/web`    | `next dev` 或 standalone Node server；本机/pnpm/Docker 启动 | Next.js、React、AntD、TanStack Query、config、contracts | 渲染开发页；通过自身 Route Handler 代理 health | 不直连 DB；不拥有 Domain mutation/final AuthZ                    |
-| `apps/api`    | Node 进程；Nest bootstrap，Fastify 处理 HTTP                | NestJS、Fastify、Swagger、Postgres adapter              | live/ready health，OpenAPI 文档                | 当前无 Catalog/Search endpoint；Controller 不是 Domain owner     |
-| `apps/worker` | 独立 Node HTTP 进程                                         | config、contracts、Postgres adapter                     | live/ready health                              | 尚无 pg-boss/job；不能绕过 Application/owner boundary 写任意数据 |
+| App                | 进程与启动者                                                | 主要依赖                                                | 当前能做什么                                                | 不能做什么                                                       |
+| ------------------ | ----------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| `apps/web`         | `next dev` 或 standalone Node server；本机/pnpm/Docker 启动 | Next.js、React、AntD、TanStack Query、config、contracts | Explore/Search、Catalog Detail；通过 Route Handler 代理 API | 不直连 DB；不拥有 Domain mutation/final AuthZ                    |
+| `apps/api`         | Node 进程；Nest bootstrap，Fastify 处理 HTTP                | NestJS、Fastify、Swagger、Application、Postgres adapter | health、Search、Catalog Detail、OpenAPI                     | 不调用 MusicBrainz；Controller 不是 Domain/Search authority      |
+| `apps/worker`      | 独立 Node HTTP 进程                                         | config、contracts、Postgres adapter                     | live/ready health                                           | 尚无 pg-boss/job；不能绕过 Application/owner boundary 写任意数据 |
+| `apps/catalog-cli` | 短生命周期 Node CLI                                         | Application、Provider/Postgres adapters、typed config   | 按 Provider ID 导入；显式 rebuild Search                    | 不是公开 HTTP ingestion endpoint；不提供产品 Search              |
 
 ### 2.2 Core Packages
 
-| Package             | 当前职责                                                                     | 状态                                    |
-| ------------------- | ---------------------------------------------------------------------------- | --------------------------------------- |
-| `contracts`         | `HealthResponse`、service/status vocabulary 与生成的 OpenAPI artifact        | health 已实现                           |
-| `config`            | 将无类型 `process.env` 校验、转换成 Web/API/Worker typed config              | 已实现                                  |
-| `application`       | 内层 Application boundary；`CatalogQueryPort`                                | Port 已定义，由 PostgreSQL adapter 实现 |
-| `domain-catalog`    | canonical Artist/Album/Recording、typed identity、ProviderMapping invariants | Stage 1 foundation 已实现               |
-| 其他 `domain-*`     | 预留 owner/package 边界                                                      | capability 未实现                       |
-| `adapters-postgres` | Kysely/pg、迁移、probe、Catalog query adapter 与开发 fixtures                | Task 1.3 persistence 已实现             |
-| `ai-runtime`        | 非权威 AI execution 边界                                                     | skeleton；没有 Agent/LLM/RAG/Tools      |
+| Package                | 当前职责                                                                     | 状态                               |
+| ---------------------- | ---------------------------------------------------------------------------- | ---------------------------------- |
+| `contracts`            | Health 与 Catalog HTTP transport types、service vocabulary、OpenAPI artifact | Stage 1 contracts 已实现           |
+| `config`               | 将无类型 `process.env` 校验、转换成 Web/API/Worker/Provider typed config     | 已实现                             |
+| `application`          | Catalog ingestion 编排、Search/Detail queries 与最小 typed ports             | 已实现                             |
+| `domain-catalog`       | canonical Artist/Album/Recording、typed identity、ProviderMapping invariants | Stage 1 foundation 已实现          |
+| 其他 `domain-*`        | 预留 owner/package 边界                                                      | capability 未实现                  |
+| `adapters-postgres`    | Catalog query/write、Search projection/query、Detail read、迁移与 fixtures   | Tasks 1.3–1.4 已实现               |
+| `adapters-musicbrainz` | MusicBrainz/CAA client、DTO 与 ACL normalization                             | Task 1.3.5 已实现                  |
+| `ai-runtime`           | 非权威 AI execution 边界                                                     | skeleton；没有 Agent/LLM/RAG/Tools |
 
 ### 2.3 Engineering / Infrastructure
 
@@ -199,7 +203,7 @@ ServiceStatusCard
 1. `src/main.ts` 调用 `readApiConfig(process.env)`。
 2. `createApplication(config)` 在 `src/application.ts` 中用 `NestFactory.create` 创建 Nest app，并传入 `FastifyAdapter`。
 3. `AppModule.register(config)` 在 `src/app.module.ts` 建立 DynamicModule。
-4. Module 用 symbol token 注入 `API_CONFIG`、Kysely `DATABASE`，注册 `HealthService`、`HealthController` 与 DB lifecycle cleanup。
+4. Module 用 symbol token 注入 Kysely `DATABASE`，组合 `SearchCatalogQuery`、`CatalogDetailQuery` 与 PostgreSQL adapters，并注册 health/Search/Catalog controllers 和 DB lifecycle cleanup。
 5. Swagger 在 `/docs` 暴露 UI，在 `/docs/openapi.json` 暴露 JSON。
 6. `main.ts` 最后 `listen(config.port, config.host)`。
 
@@ -211,7 +215,7 @@ ServiceStatusCard
 - **DI**：Consumer 声明依赖 token，由 composition root 决定注入哪个实例。
 - **Fastify**：Nest 下面实际接收 socket/HTTP 的 platform adapter；Nest 提供更高层的 module/DI/decorator 模型。
 
-`Controller != Business Logic`：当前 Controller 只调用 `HealthService` 并把 degraded readiness 映射成 HTTP 503。未来 Catalog 请求应是：Controller 校验 API input → 调用 Application query/use case → Application 使用 Port → Adapter 返回 Domain/结果 → Controller 映射为 API DTO。Controller 不应直接写 SQL 或决定 canonical identity。
+`Controller != Business Logic`：Health Controller 把 degraded readiness 映射成 HTTP 503；Search/Catalog Controllers 只校验 transport input、调用 Application query，并映射 400/404。SQL、ranking、canonical identity 与 Provider access 均不在 Controller。
 
 ### 5.3 Liveness、readiness 与 OpenAPI
 
@@ -236,6 +240,7 @@ Worker 是独立 deployable，适合耗时、异步、可重试、无需占用 H
 - 要求 DB URL 是 `postgresql://`；
 - 提供安全 default；
 - 输出 `ApiConfig`、`WorkerConfig`、`WebConfig`。
+- 输出 server-only `CatalogProviderConfig`，限制 MusicBrainz interval 不低于 1 秒，并配置 timeout/retry/base URL/User-Agent；这些变量不使用 `NEXT_PUBLIC_*`。
 
 Web 有两个地址：
 
@@ -246,7 +251,7 @@ Web 有两个地址：
 
 ## 8. `packages/contracts`
 
-当前手写 contract 是 `HealthResponse`，让 Web/API/Worker 对 service、status、checks 使用同一 transport vocabulary。Contract 面向跨进程/跨边界的消费者，不必等于 Domain type：
+当前手写 contract 包含 `HealthResponse`；Search/Detail HTTP schema 由明确 DTO + OpenAPI 生成。Contract 面向跨进程/跨边界的消费者，不必等于 Domain type：
 
 - Domain type 为 invariant 和 ownership 服务；
 - API contract 为兼容性、序列化、版本化和外部消费服务；
@@ -254,9 +259,9 @@ Web 有两个地址：
 
 三者演进原因不同，因此不能直接把 row 返回浏览器，也不应默认把 Domain object 当长期 public API。`yara.openapi.json` 是从 Nest API metadata 生成的另一个 machine-readable contract；当前 frontend 尚未从它 codegen，未来可以在明确采用后生成 client/types，但本轮没有实现。
 
-## 9. `packages/application` 与 `CatalogQueryPort`
+## 9. `packages/application`：Catalog ports 与 use cases
 
-当前真实代码只有最小 read boundary：
+基础 canonical read boundary 仍是：
 
 ```ts
 interface CatalogQueryPort {
@@ -267,9 +272,9 @@ interface CatalogQueryPort {
 }
 ```
 
-Application 可以依赖 `domain-catalog`，因为它编排 Domain vocabulary；它不能依赖 Kysely，因为数据库只是可替换的外层实现。Port 是由内层定义的 interface，未来 PostgreSQL adapter 依照它实现。测试也可注入 in-memory fake，而不启动 PostgreSQL。
+Application 可以依赖 `domain-catalog`，因为它编排 Domain vocabulary；它不能依赖 Kysely。当前还定义了最小 `ExternalCatalogProviderPort`、`CatalogWritePort`、`CatalogSearchQueryPort`、`CatalogSearchProjectionPort` 与 `CatalogDetailQueryPort`。
 
-注意当前没有 Catalog Application query class，也没有 Port implementation。存在 interface 不代表 `/search` 或 Catalog 查询已经可以运行。
+`CatalogIngestionService` 先取 normalized provider candidate，再解析 mapping、调用 Catalog write port，最后重建 projection。`SearchCatalogQuery` 负责 trim/长度/limit/kind 校验；`CatalogDetailQuery` 委托 typed read port。具体 HTTP、MusicBrainz 与 SQL 实现都在外层。
 
 ## 10. Domain packages：边界存在不等于 capability 完成
 
@@ -348,9 +353,18 @@ Yara ArtistRef / AlbumRef / RecordingRef
 
 - `createPostgresDatabase()` 创建 `pg.Pool`（默认最多 10 connections）和 Kysely instance。
 - Kysely 是 type-safe SQL/query builder，不是 Domain model；`YaraDatabase` 目前只声明 Catalog-owned tables，row types 保持在 adapter 内部。
-- `migrateStageZero()` 用 Kysely Migrator 创建 `pg_trgm` 与 `vector` extensions；down 有意不自动 drop shared future extensions。
+- `migrateYaraDatabase()` 依次执行 extension、Catalog foundation/metadata 与 `0004_catalog_search_projection`；Search schema 是可重建 projection，不是 Catalog truth。
 - `probePostgres()` 查询 PostgreSQL server version 与已安装 extension。
 - `migrate.ts` 是可执行 migration entry，读取 config、迁移、打印结果、destroy pool。
+
+Catalog adapter 分工：
+
+- `PostgresCatalogWriteAdapter` 在事务和 provider-identity advisory lock 内接受 normalized observation、生成 opaque Yara ID、维护 mapping 和 ordered relations；重复 ingest 复用 canonical ref。
+- `PostgresCatalogSearchAdapter` 从 canonical Catalog 全量、确定性重建 `search.catalog_documents`，使用 exact/prefix、FTS、`pg_trgm` 和稳定 tie-breakers 查询。
+- `PostgresCatalogDetailAdapter` 组装 Artist/Album/Recording read model；不把 DB row 暴露给 API。
+- `PostgresCatalogQueryAdapter` 继续负责 Domain entity/mapping round-trip，并经 Domain factory 复验。
+
+`packages/adapters-musicbrainz` 与 Catalog 写入解耦：Provider HTTP client 负责 User-Agent、timeout、1 req/s 默认 pacing 与 bounded retry；DTO schema fail closed；normalizer 只输出批准字段。release-group 先取得 releases，再用确定性 representative release 获取 tracklist，但 Physical release 本身不会进入 Catalog。
 
 依赖图更准确地画成：
 
@@ -427,6 +441,8 @@ Liveness 与 readiness 不同：
 - `packages/config/src/index.test.ts`：default 与非法关键环境值。
 - `apps/api/src/health.controller.test.ts`：liveness 不冒充 readiness；DB probe 失败映射为 503。
 - `apps/web/theme/tokens.test.ts`：设计 token anchor。
+- `musicbrainz-adapter.test.ts`：Provider DTO/normalization、pacing、timeout、404、503、malformed schema 与 CAA degradation。
+- `catalog-search.test.ts`、API controller tests：Application input gate 与 HTTP 400/404 mapping。
 
 ### 16.2 Domain invariant tests
 
@@ -446,7 +462,7 @@ Liveness 与 readiness 不同：
 - Architecture script：合法 TS 但不合法 architecture 的 import。
 - Docker/runtime：DNS、端口、镜像构建、DB extension、真实连接与启动顺序；编译器无法发现。
 
-当前没有真正的 browser E2E 或 Catalog persistence integration test。
+PostgreSQL integration tests 会创建隔离数据库，验证 0002→0004/fresh migration、fixtures、provider mapping、write rollback/idempotency、projection rebuild、Search ranking 和 Detail read models。当前仍没有正式 browser E2E。
 
 ## 17. `check-architecture.mjs`
 
@@ -503,13 +519,13 @@ Postgres migration
 API/Web smoke
 ```
 
-当前目录没有 `.git` repository，因此 workflow 文件虽然存在，但从未由这个目录 push 触发。只有初始化/连接 GitHub repository 并发生匹配事件后，GitHub Actions 才会实际运行。
+当前目录是 Git repository，工作分支为 `feat/musicbrainz-catalog-adapter`，并配置了 `origin`。本地存在/更新 workflow 不等于 GitHub Actions 已运行；只有 push 或 pull request 触发匹配事件后，远端 runner 才会执行并留下独立证据。
 
 ## 20. OpenAPI
 
 OpenAPI 是 HTTP API 的 machine-readable 描述：路径、method、status、schema。Nest 的 Swagger decorators 和 application metadata 经 `generate-openapi.ts` 产生 `packages/contracts/openapi/yara.openapi.json`。
 
-当前用途是 baseline/审阅/未来 tooling 输入；Web 仍手写 `HealthResponse` 和 fetch，没有直接使用 JSON，也没有 client codegen。未来可选择从 OpenAPI 生成 client/types并在 CI 检查 drift，但这是尚未批准/实现的后续工作。
+当前 artifact 包含 `/health/*`、`/search`、`/artists/{id}`、`/albums/{id}`、`/recordings/{id}`；Search response 用 discriminator 定义 Artist/Album/Recording union。Web 通过 `@yara/contracts` 的显式 transport types、运行时 response guard 与 Next BFF 消费这些 endpoints；UI 不直接读取 OpenAPI JSON，也不暴露 DB row。
 
 生成文件不必逐行读：优先检查 endpoint/schema/status 的语义 diff，以及它是否与 source controller/DTO 改动一致。
 
@@ -526,25 +542,39 @@ OpenAPI 是 HTTP API 的 machine-readable 描述：路径、method、status、sc
 
 未来这里会放受控 runtime、execution/session mechanics、provider-facing execution ports 等，但仍不能直接写 Memory/Taste/Knowledge/Collection 或拥有 Domain truth。具体实现必须等待对应 Stage。
 
-## 22. Future Catalog request preview（不是现有功能）
+## 22. 当前 Catalog Search / Detail 请求链路
 
 ```text
 Browser
-  ↓ GET /search                    [尚未实现]
-Search Controller                 [尚未实现]
+  ↓ GET /search
+Search Controller
   ↓
-Application Search/Catalog Query  [尚未实现]
+SearchCatalogQuery（input gate）
   ↓
-CatalogQueryPort                  [已定义]
+CatalogSearchQueryPort
   ↓
-Postgres Catalog Adapter          [已实现]
+PostgresCatalogSearchAdapter
   ↓
-Catalog tables / fixtures         [已实现]
+search.catalog_documents（derived / rebuildable）
   ↓
-PostgreSQL/Kysely foundation      [基础已实现]
+canonical refs + typed SearchResult union
 ```
 
-Task 1.3 补齐了 persistence/fixtures，但没有实现 Search endpoint/UI。Search 仍是后续 Task，且 `Search != Retrieval != Recommendation`。
+Detail 路径是 `CatalogController → CatalogDetailQuery → CatalogDetailQueryPort → PostgresCatalogDetailAdapter → catalog.*`。产品 Search 绝不访问 MusicBrainz；Provider outage 不影响已导入对象的 Search/Detail。`Search != Retrieval != Recommendation`，当前没有 vector/LLM/personalized ranking。
+
+### 22.1 当前 Web Search / Detail 请求链路
+
+```text
+Explore input + URL ?q=
+  ↓ 320 ms debounce
+TanStack Query（cache / cancellation / stale protection）
+  ↓ typed catalog-api client + runtime response guard
+Next Route Handler BFF `/api/catalog/*`
+  ↓ server-side proxy
+Yara API Search / Detail
+```
+
+`apps/web/features/catalog/` 按 query、transport、result component、detail surface 和纯 utility 拆分。Search 通过 `kind` 分流，不根据 optional field 猜类型；Detail links 使用 API 返回的 canonical ID。路径 ingress decode 一次、outbound encode 一次，支持 `album:yara:<uuid>`，不从名称或 Provider ID 推导 identity。浏览器 Back 依赖标准 Next/history，并由 `/explore?q=...` 恢复 query，不创建自定义 navigation stack。
 
 ## 23. 每次 Codex 改动后的固定 Code Review 方法
 
@@ -611,6 +641,18 @@ docker compose logs -f api
 # 直接检查 health
 curl -i http://localhost:4000/health/live
 curl -i http://localhost:4000/health/ready
+
+# 本地 fixtures 与 Search projection（会重置 development Catalog fixtures）
+pnpm db:seed
+pnpm search:rebuild
+
+# Provider ingestion（Album 参数是 MusicBrainz release-group ID）
+DATABASE_URL=postgresql://yara:yara_local_only@localhost:5432/yara \
+  pnpm catalog:ingest:musicbrainz album <musicbrainz-release-group-id>
+
+# Search / Detail
+curl 'http://localhost:4000/search?q=radiohead'
+curl 'http://localhost:4000/albums/album%3Aok-computer'
 
 # 查看 OpenAPI endpoint
 curl http://localhost:4000/docs/openapi.json

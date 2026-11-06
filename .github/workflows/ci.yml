@@ -48,6 +48,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate
       - run: pnpm test:integration
+      - run: pnpm db:seed
+      - run: pnpm search:rebuild
       - run: pnpm verify
       - name: API and Web smoke
         shell: bash
@@ -62,6 +64,10 @@ jobs:
             sleep 1
           done
           curl --fail --silent http://127.0.0.1:4000/health/ready
+          curl --fail --silent 'http://127.0.0.1:4000/search?q=radiohead'
+          curl --fail --silent 'http://127.0.0.1:4000/artists/artist%3Aradiohead'
+          curl --fail --silent 'http://127.0.0.1:4000/albums/album%3Aok-computer'
+          curl --fail --silent 'http://127.0.0.1:4000/recordings/recording%3Aparanoid-android'
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:3000 >/dev/null; then break; fi
             sleep 1
