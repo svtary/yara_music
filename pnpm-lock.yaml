@@ -68,9 +68,15 @@ importers:
       '@nestjs/swagger':
         specifier: 12.0.5
         version: 12.0.5(@fastify/static@10.1.8)(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(typescript@6.0.2)
+      '@yara/adapters-openai':
+        specifier: workspace:*
+        version: link:../../packages/adapters-openai
       '@yara/adapters-postgres':
         specifier: workspace:*
         version: link:../../packages/adapters-postgres
+      '@yara/ai-runtime':
+        specifier: workspace:*
+        version: link:../../packages/ai-runtime
       '@yara/application':
         specifier: workspace:*
         version: link:../../packages/application
@@ -80,6 +86,9 @@ importers:
       '@yara/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@yara/domain-yara-interaction':
+        specifier: workspace:*
+        version: link:../../packages/domain-yara-interaction
       fastify:
         specifier: 5.12.7
         version: 5.12.7
@@ -173,8 +182,20 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
+  packages/adapters-openai:
+    dependencies:
+      '@yara/ai-runtime':
+        specifier: workspace:*
+        version: link:../ai-runtime
+      openai:
+        specifier: 7.52.0
+        version: 7.52.0(zod@4.6.7)
+
   packages/adapters-postgres:
     dependencies:
+      '@yara/ai-runtime':
+        specifier: workspace:*
+        version: link:../ai-runtime
       '@yara/application':
         specifier: workspace:*
         version: link:../application
@@ -184,6 +205,9 @@ importers:
       '@yara/domain-catalog':
         specifier: workspace:*
         version: link:../domain-catalog
+      '@yara/domain-yara-interaction':
+        specifier: workspace:*
+        version: link:../domain-yara-interaction
       kysely:
         specifier: 0.29.8
         version: 0.29.8
@@ -199,9 +223,15 @@ importers:
 
   packages/application:
     dependencies:
+      '@yara/ai-runtime':
+        specifier: workspace:*
+        version: link:../ai-runtime
       '@yara/domain-catalog':
         specifier: workspace:*
         version: link:../domain-catalog
+      '@yara/domain-yara-interaction':
+        specifier: workspace:*
+        version: link:../domain-yara-interaction
 
   packages/config:
     dependencies:
@@ -2060,6 +2090,33 @@ packages:
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
     engines: {node: '>=14.0.0'}
+
+  openai@7.52.0:
+    resolution: {integrity: sha512-aY0e5WGnTfAae81ygo+cbRaYwSQNowoyyxvAKNC0vu8orz3bl4cbz1il3Ce6I2rNea5et/FGDxj82OO9iB4+nA==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      google-auth-library: '>=9.15.1 <12'
+      undici: '>=5 <9'
+      ws: ^8.21.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      google-auth-library:
+        optional: true
+      undici:
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -4304,6 +4361,10 @@ snapshots:
   obug@3.0.0: {}
 
   on-exit-leak-free@2.1.2: {}
+
+  openai@7.52.0(zod@4.6.7):
+    optionalDependencies:
+      zod: 4.6.7
 
   optionator@0.9.4:
     dependencies:

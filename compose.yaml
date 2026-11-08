@@ -42,6 +42,12 @@ services:
       API_PORT: 4000
       DATABASE_URL: postgresql://yara:yara_local_only@postgres:5432/yara
       LOG_LEVEL: info
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-disabled}
+      MODEL_NAME: ${MODEL_NAME:-gpt-5-mini}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      MODEL_TIMEOUT_MS: ${MODEL_TIMEOUT_MS:-30000}
+      YARA_ACTOR_REF: ${YARA_ACTOR_REF:-user:yara:local}
     ports:
       - '4000:4000'
     depends_on:

@@ -593,11 +593,117 @@ const catalogSearchProjectionMigration: Migration = {
   },
 };
 
+const yaraInteractionFoundationMigration: Migration = {
+  async up(database): Promise<void> {
+    await sql`
+      create schema if not exists yara_interaction;
+
+      create table yara_interaction.conversations (
+        id text primary key,
+        owner_ref text not null,
+        status text not null default 'active',
+        created_at timestamptz not null,
+        updated_at timestamptz not null,
+        constraint yara_conversations_id_valid check (
+          id ~ '^conversation:yara:[0-9a-f-]{36}$'
+        ),
+        constraint yara_conversations_owner_valid check (
+          length(owner_ref) between 1 and 256 and owner_ref !~ '[[:cntrl:]]'
+        ),
+        constraint yara_conversations_status_valid check (status in ('active', 'archived')),
+        constraint yara_conversations_time_valid check (updated_at >= created_at)
+      );
+
+      create index yara_conversations_owner_updated
+        on yara_interaction.conversations (owner_ref, updated_at desc, id);
+
+      create table yara_interaction.conversation_messages (
+        id text primary key,
+        conversation_id text not null
+          references yara_interaction.conversations(id) on delete restrict,
+        sequence integer not null check (sequence > 0),
+        role text not null check (role in ('user', 'assistant')),
+        status text not null default 'committed' check (status = 'committed'),
+        content text not null,
+        created_at timestamptz not null,
+        unique (conversation_id, sequence),
+        constraint yara_messages_id_valid check (id ~ '^message:yara:[0-9a-f-]{36}$'),
+        constraint yara_messages_content_valid check (
+          length(content) between 1 and 20000
+          and content = btrim(content)
+        )
+      );
+
+      create table yara_interaction.ai_execution_runs (
+        id text primary key,
+        conversation_id text not null
+          references yara_interaction.conversations(id) on delete restrict,
+        trigger_message_id text not null
+          references yara_interaction.conversation_messages(id) on delete restrict,
+        assistant_message_id text
+          references yara_interaction.conversation_messages(id) on delete restrict,
+        status text not null,
+        provider text not null,
+        model text not null,
+        provider_response_id text,
+        usage jsonb,
+        failure jsonb,
+        created_at timestamptz not null,
+        started_at timestamptz,
+        finished_at timestamptz,
+        updated_at timestamptz not null,
+        constraint yara_runs_id_valid check (id ~ '^ai-run:yara:[0-9a-f-]{36}$'),
+        constraint yara_runs_status_valid check (
+          status in ('pending', 'running', 'completed', 'failed', 'cancelled')
+        ),
+        constraint yara_runs_provider_model_valid check (
+          length(provider) between 1 and 128 and length(model) between 1 and 256
+        ),
+        constraint yara_runs_state_shape_valid check (
+          (status = 'pending' and started_at is null and finished_at is null and failure is null)
+          or (status = 'running' and started_at is not null and finished_at is null and failure is null)
+          or (status = 'completed' and started_at is not null and finished_at is not null
+            and failure is null and assistant_message_id is not null)
+          or (status = 'failed' and started_at is not null and finished_at is not null
+            and failure is not null and assistant_message_id is null)
+          or (status = 'cancelled' and finished_at is not null and failure is null
+            and assistant_message_id is null)
+        )
+      );
+
+      create index yara_runs_conversation_created
+        on yara_interaction.ai_execution_runs (conversation_id, created_at desc, id);
+
+      create table yara_interaction.ai_execution_run_events (
+        run_id text not null
+          references yara_interaction.ai_execution_runs(id) on delete restrict,
+        sequence integer not null check (sequence > 0),
+        event_type text not null check (
+          event_type in (
+            'run.started', 'message.delta', 'message.completed',
+            'run.completed', 'run.failed', 'run.cancelled'
+          )
+        ),
+        payload jsonb not null,
+        created_at timestamptz not null,
+        primary key (run_id, sequence),
+        constraint yara_run_event_payload_valid check (
+          jsonb_typeof(payload) = 'object' and payload->>'type' = event_type
+        )
+      );
+    `.execute(database);
+  },
+  async down(database): Promise<void> {
+    await sql`drop schema if exists yara_interaction cascade`.execute(database);
+  },
+};
+
 export type YaraMigrationName =
   | '0001_stage_zero_extensions'
   | '0002_catalog_foundation'
   | '0003_catalog_album_metadata'
-  | '0004_catalog_search_projection';
+  | '0004_catalog_search_projection'
+  | '0005_yara_interaction_foundation';
 
 function createYaraMigrator(database: Kysely<YaraDatabase>): Migrator {
   return new Migrator({
@@ -609,6 +715,7 @@ function createYaraMigrator(database: Kysely<YaraDatabase>): Migrator {
           '0002_catalog_foundation': catalogFoundationMigration,
           '0003_catalog_album_metadata': catalogAlbumMetadataMigration,
           '0004_catalog_search_projection': catalogSearchProjectionMigration,
+          '0005_yara_interaction_foundation': yaraInteractionFoundationMigration,
         };
       },
     },

@@ -8,7 +8,7 @@ This file tracks implementation progress. It does not create or modify architect
 | ----- | ----------------------------------------------------------------------------------------- | -------------------------------- |
 | 0     | Repository foundation: monorepo boundaries, contracts, local PostgreSQL/Compose, CI smoke | **ACCEPTED**                     |
 | 1     | Identity, Catalog, canonical mapping, Search, Detail, UI                                  | **ACCEPTED** — Task 1.5 complete |
-| 2     | Conversation / SSE / Model Adapter                                                        | Not started                      |
+| 2     | Conversation / SSE / Model Adapter                                                        | **ACCEPTED**                     |
 | 3     | Knowledge, Hybrid Retrieval, Evidence Package, citations                                  | Not started                      |
 | 4     | Typed Tools, StructuredResult lifecycle, clarification, idempotent save                   | Not started                      |
 | 5     | Collection, explicit Taste, grounded Recommendation                                       | Not started                      |
@@ -18,11 +18,11 @@ This file tracks implementation progress. It does not create or modify architect
 
 ## Current stage
 
-**STAGE 1 — ACCEPTED**
+**STAGE 2 — ACCEPTED**
 
 ## Current task
 
-No active implementation task. Task 1.5 and Stage 1 are complete and accepted. Stop; do not begin Stage 2 automatically.
+Stage 2 is complete and accepted. No Stage 3 implementation has started.
 
 ## Completed tasks
 
@@ -79,53 +79,76 @@ No active implementation task. Task 1.5 and Stage 1 are complete and accepted. S
 - Fixed and regression-tested the canonical route boundary discovered during runtime verification: encoded Next path parameters are decoded once at ingress and encoded once for each outbound path, so IDs such as `album:yara:<uuid>` are never double-encoded.
 - Verified the complete Docker/browser journey with imported MusicBrainz data: Radiohead Search, real OK Computer Album with 12 ordered recordings, Airbag Recording, Artist Detail, browser Back/query restoration, no-results, 404, desktop, and 393 px responsive behavior.
 - Task 1.5 — Search + Detail Frontend completed Stage 1 and was accepted after repository and runtime verification.
+- Added framework-free Yara Interaction conversation semantics with opaque `ConversationId` / `MessageId`, committed user/assistant messages, deterministic ordering, and no durable partial-message state.
+- Added a separately observable `AIExecutionRun` state machine and preserved `YaraConversation != YaraTask != AIExecutionRun != AgentSession`; Stage 2 does not introduce Task or AgentSession aliases.
+- Added owner-separated `yara_interaction` PostgreSQL tables through forward migration `0005_yara_interaction_foundation`, including transactional user-message/run acceptance, terminal assistant commit, and replayable run-event sequencing.
+- Added a provider-neutral `ModelProviderPort`, a higher-level pass-through `AgentRuntimePort`, and a real OpenAI Responses streaming adapter. Provider SDK types and raw failures do not cross the adapter boundary.
+- Added typed server-only model configuration with a safe `disabled` default; a model API key is required only when `MODEL_PROVIDER=openai`.
+- Added Application orchestration for bounded recent Conversation context, run execution, safe failure/cancel behavior, and assistant-message commit only after successful provider completion. Context compaction does not create Memory.
+- Added typed Conversation/Run HTTP contracts and OpenAPI routes for create/read/send, poll, cancel, and SSE. Yara-owned SSE uses event sequence IDs, bounded replay, heartbeat, terminal close, current-owner recheck, and polling fallback from the same persisted authority.
+- Added responsive `/yara` Web UI and narrow Next BFF routes with durable message history, ephemeral streaming partials, loading/failure/retry/stop/reconnect states, refresh-resumable run identity, and distinct disconnect versus cancel behavior.
+- Verified the provider-disabled runtime path on the host build and in Node 24 Compose containers: `run.started → run.failed`, Last-Event-ID replay, poll consistency, and no fabricated assistant message. Desktop and mobile-breakpoint screenshots were inspected.
+- Closed the frozen Stage 2 product slice: `/yara` is now Yara Home and performs no implicit mutation; explicit prompt submission creates exactly one Conversation and AIExecutionRun before navigating to the canonical streaming Conversation URL.
+- Added the bounded Y-07 Conversation History read model and real PostgreSQL-backed Continue behavior. Empty conversations are excluded, recent activity ordering is deterministic, and reopened conversations restore committed history after refresh or primary navigation.
+- Matched the inspected Mobile/Desktop Yara Home, Conversation, and History Figma hierarchy without fabricating later-stage citations, Tasks, Recommendation/Taste, or Memory capabilities.
+- Verified a real model completion (`YARA_FINAL_CLOSURE_OK`) in the rebuilt Node 24 Compose runtime, then verified Explore → Yara Home → Continue/History → reopened committed history end to end.
+- Stage 2 — Conversation / SSE / Model Adapter completed and was accepted without starting RAG, Knowledge, citations, Recommendation, Taste, Memory, Tool Calling, StructuredResult, Collection, Agent SDK, MCP, LangGraph, or multi-agent work.
 
 ## Next tasks
 
-- **Stage 2 — Conversation / SSE / Model Adapter**. Not started; begin only after explicit approval.
+- **Stage 3 — Knowledge / Hybrid Retrieval / Evidence Package / Citations**. Do not begin it automatically.
 
 ## Blockers
 
-- No Stage 1 implementation blocker.
+- No Stage 2 implementation blocker.
 - Local shell reports Node.js 22, while the canonical container runtime is Node.js 24.22.2. Host verification and the passed Node 24 container build/runtime verification remain explicitly distinguished.
 - The repository is on branch `feat/musicbrainz-catalog-adapter` with remote `origin`; GitHub Actions was not run from this local implementation turn.
 
 ## Verification status
 
-| Check                         | Status  | Evidence / note                                                                      |
-| ----------------------------- | ------- | ------------------------------------------------------------------------------------ |
-| Dependency install            | Passed  | Frozen lockfile install completed in Docker; 18 workspaces                           |
-| Format check                  | Passed  | `pnpm verify` → Prettier check passed                                                |
-| Lint                          | Passed  | `pnpm verify` → ESLint passed                                                        |
-| Architecture dependency check | Passed  | 105 source files scanned; Domain/Application boundaries remain framework-free        |
-| Context integrity check       | Passed  | 11 canonical files, seven baselines, and seven compatibility aliases verified        |
-| Typecheck                     | Passed  | 13 packages + 4 apps                                                                 |
-| Tests                         | Passed  | Unit/default: 10 files / 45 tests; PostgreSQL integration: 2 files / 12 tests        |
-| Build                         | Passed  | Packages, Catalog CLI, API, Worker, and Next.js 16.4.3 production build              |
-| OpenAPI generation            | Passed  | Health, typed `/search`, and Artist/Album/Recording Detail paths generated           |
-| Docker Compose build/startup  | Passed  | Node 24 images rebuilt; PostgreSQL, API, Worker, and Web started successfully        |
-| PostgreSQL connectivity       | Passed  | PostgreSQL 18.6 healthy; migration exited 0; API and Worker probes report `ok`       |
-| pgvector availability         | Passed  | API/Worker readiness report pgvector and `pg_trgm` available                         |
-| API/Worker health             | Passed  | Ports 4000/4001 readiness returned 200 with all checks `ok`                          |
-| Web API proxy                 | Passed  | `GET http://127.0.0.1:3000/api/health/ready` returned canonical API readiness        |
-| Web production runtime        | Passed  | Docker Web and local standalone launcher served CSS/JS assets and hydrated queries   |
-| SSR / refresh / hydration     | Passed  | Ant SSR styles present; refresh retained styles; browser console had no warnings     |
-| Responsive smoke              | Passed  | 393 px Catalog UI: mobile nav, stable cards, no horizontal overflow                  |
-| Catalog type safety           | Passed  | Artist/Album/Recording/provider IDs are nominally distinct                           |
-| Catalog mapping invariants    | Passed  | external taxonomy separated; ref/candidate kinds and cardinality enforced            |
-| Catalog migration             | Passed  | existing 0002 and fresh DB reached 0004; data/history preserved; repeat was no-op    |
-| Catalog fixture seed          | Passed  | Repeatable seed: 3 Artists, 4 Albums, 7 Recordings, 7 mapping states                 |
-| Catalog adapter round trip    | Passed  | Artist/Album/Recording metadata, ordered relations, mappings and constraints passed  |
-| Task 1.3.2 integration tests  | Passed  | 1 file / 6 PostgreSQL tests on PostgreSQL 18.6                                       |
-| Canonical Docker build        | Passed  | Node 24 images rebuilt; migration exit 0; API/Worker/Web health verified             |
-| Provider unit tests           | Passed  | DTO/ACL, pacing, timeout, 404, 503, retry bound, malformed response, CAA degradation |
-| Catalog Search projection     | Passed  | Fixture/imported data, deterministic rebuild/rank, FTS/prefix/trigram verified       |
-| Catalog Detail APIs           | Passed  | Artist/Album/Recording, ordered tracklist, contexts, 404, no row/payload leakage     |
-| Real Provider smoke           | Passed  | Radiohead → OK Computer → 12 recordings; CAA cover; Airbag idempotent re-ingest      |
-| Docker Search/Detail runtime  | Passed  | Node 24 API served imported Airbag Search/Detail; API/Worker healthy; Web 200        |
-| Frontend behavior tests       | Passed  | 1 file / 12 tests: states, union groups, API boundary, IDs, Detail, order, duration  |
-| Search/Detail Web routes      | Passed  | `/explore` and canonical Artist/Album/Recording routes built and served              |
-| Browser vertical slice        | Passed  | Radiohead → OK Computer → Airbag → Back restored `?q=Radiohead`                      |
-| Frontend state handling       | Passed  | Idle, loading logic, no-results, transport error logic, malformed response, 404      |
-| Responsive Catalog UI         | Passed  | Desktop rail and 393 px mobile nav; no horizontal overflow; console clean            |
-| GitHub Actions                | Not run | Workflow updated; no remote Actions run was triggered in this local turn             |
+| Check                         | Status  | Evidence / note                                                                        |
+| ----------------------------- | ------- | -------------------------------------------------------------------------------------- |
+| Dependency install            | Passed  | Frozen lockfile install passed; 460-entry supply-chain policy check passed             |
+| Format check                  | Passed  | `pnpm verify` → Prettier check passed                                                  |
+| Lint                          | Passed  | `pnpm verify` → ESLint passed                                                          |
+| Architecture dependency check | Passed  | 145 source files scanned; Domain/Application/AI Runtime rules passed                   |
+| Context integrity check       | Passed  | 11 canonical files, seven baselines, and seven compatibility aliases verified          |
+| Typecheck                     | Passed  | 13 packages + 4 apps                                                                   |
+| Tests                         | Passed  | Unit/default: 18 files / 66 tests; focused Yara PostgreSQL integration: 2 tests        |
+| Build                         | Passed  | All packages, Catalog CLI, API, Worker, and Next.js 16.4.3 production build            |
+| OpenAPI generation            | Passed  | Catalog plus typed Conversation, AI run, cancel, poll, and SSE paths generated         |
+| Docker Compose image rebuild  | Passed  | Current migrate/API/Web images rebuilt on the canonical Node 24.22.2 base              |
+| Docker Compose startup        | Passed  | Migration exited 0; PostgreSQL, API, Worker, and Web are running; health checks pass   |
+| PostgreSQL connectivity       | Passed  | PostgreSQL 18.6 healthy; migration exited 0; API and Worker probes report `ok`         |
+| pgvector availability         | Passed  | API/Worker readiness report pgvector and `pg_trgm` available                           |
+| API/Worker health             | Passed  | Ports 4000/4001 readiness returned 200 with all checks `ok`                            |
+| Web API proxy                 | Passed  | `GET http://127.0.0.1:3000/api/health/ready` returned canonical API readiness          |
+| Web production runtime        | Passed  | Docker Web and local standalone launcher served CSS/JS assets and hydrated queries     |
+| SSR / refresh / hydration     | Passed  | Ant SSR styles present; refresh retained styles; browser console had no warnings       |
+| Responsive smoke              | Passed  | 393 px Catalog UI: mobile nav, stable cards, no horizontal overflow                    |
+| Catalog type safety           | Passed  | Artist/Album/Recording/provider IDs are nominally distinct                             |
+| Catalog mapping invariants    | Passed  | external taxonomy separated; ref/candidate kinds and cardinality enforced              |
+| Catalog migration             | Passed  | existing 0002 and fresh DB reached 0004; data/history preserved; repeat was no-op      |
+| Catalog fixture seed          | Passed  | Repeatable seed: 3 Artists, 4 Albums, 7 Recordings, 7 mapping states                   |
+| Catalog adapter round trip    | Passed  | Artist/Album/Recording metadata, ordered relations, mappings and constraints passed    |
+| Task 1.3.2 integration tests  | Passed  | 1 file / 6 PostgreSQL tests on PostgreSQL 18.6                                         |
+| Canonical Docker build        | Passed  | Node 24 images rebuilt; migration exit 0; API/Worker/Web health verified               |
+| Provider unit tests           | Passed  | DTO/ACL, pacing, timeout, 404, 503, retry bound, malformed response, CAA degradation   |
+| Catalog Search projection     | Passed  | Fixture/imported data, deterministic rebuild/rank, FTS/prefix/trigram verified         |
+| Catalog Detail APIs           | Passed  | Artist/Album/Recording, ordered tracklist, contexts, 404, no row/payload leakage       |
+| Real Provider smoke           | Passed  | Radiohead → OK Computer → 12 recordings; CAA cover; Airbag idempotent re-ingest        |
+| Docker Search/Detail runtime  | Passed  | Node 24 API served imported Airbag Search/Detail; API/Worker healthy; Web 200          |
+| Frontend behavior tests       | Passed  | 1 file / 12 tests: states, union groups, API boundary, IDs, Detail, order, duration    |
+| Search/Detail Web routes      | Passed  | `/explore` and canonical Artist/Album/Recording routes built and served                |
+| Browser vertical slice        | Passed  | Radiohead → OK Computer → Airbag → Back restored `?q=Radiohead`                        |
+| Frontend state handling       | Passed  | Idle, loading logic, no-results, transport error logic, malformed response, 404        |
+| Responsive Catalog UI         | Passed  | Desktop rail and 393 px mobile nav; no horizontal overflow; console clean              |
+| Conversation Domain           | Passed  | Typed identity, committed-only message/order invariants, Conversation/Run separation   |
+| AI execution orchestration    | Passed  | Success-only assistant commit; provider failure stores safe run failure only           |
+| Provider adapter              | Passed  | OpenAI Responses events normalized; safe rate-limit/failure mapping tested             |
+| Yara Interaction persistence  | Passed  | Migration 0005, owner reads, event replay, delta/message separation tested on PG 18.6  |
+| SSE / polling runtime         | Passed  | Started/failed replay, Last-Event-ID, terminal close, and authoritative poll verified  |
+| Yara Home / History runtime   | Passed  | No implicit create; real Continue/history list; cross-nav and committed restore passed |
+| Yara Web / BFF runtime        | Passed  | Home → create/send → SSE → Explore → Home → Continue/History → reopen verified         |
+| Real model smoke              | Passed  | Real provider returned committed `YARA_FINAL_CLOSURE_OK` through the browser flow      |
+| GitHub Actions                | Not run | Workflow updated; no remote Actions run was triggered in this local turn               |

@@ -11,6 +11,10 @@
     "./catalog": {
       "types": "./dist/catalog.d.ts",
       "default": "./dist/catalog.js"
+    },
+    "./yara-interaction": {
+      "types": "./dist/yara-interaction.d.ts",
+      "default": "./dist/yara-interaction.js"
     }
   },
   "scripts": {
@@ -23,6 +27,8 @@
     "@yara/application": "workspace:*",
     "@yara/config": "workspace:*",
     "@yara/domain-catalog": "workspace:*",
+    "@yara/domain-yara-interaction": "workspace:*",
+    "@yara/ai-runtime": "workspace:*",
     "kysely": "0.29.8",
     "pg": "8.23.1"
   },
