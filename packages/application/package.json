@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@yara/domain-catalog": "workspace:*"
+    "@yara/ai-runtime": "workspace:*",
+    "@yara/domain-catalog": "workspace:*",
+    "@yara/domain-yara-interaction": "workspace:*"
   }
 }

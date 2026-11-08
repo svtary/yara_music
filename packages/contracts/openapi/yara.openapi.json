@@ -228,6 +228,228 @@
           "catalog"
         ]
       }
+    },
+    "/conversations": {
+      "post": {
+        "operationId": "YaraController_createConversation",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateConversationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create an owned Yara conversation",
+        "tags": [
+          "yara"
+        ]
+      },
+      "get": {
+        "operationId": "YaraController_listConversations",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListConversationsResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List recent meaningful Yara conversations for the current owner",
+        "tags": [
+          "yara"
+        ]
+      }
+    },
+    "/conversations/{id}": {
+      "get": {
+        "operationId": "YaraController_getConversation",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YaraConversationDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "summary": "Read durable committed conversation state",
+        "tags": [
+          "yara"
+        ]
+      }
+    },
+    "/conversations/{id}/messages": {
+      "post": {
+        "operationId": "YaraController_sendMessage",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendConversationMessageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendConversationMessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Commit a user message and start a separate AI execution run",
+        "tags": [
+          "yara"
+        ]
+      }
+    },
+    "/ai-runs/{id}": {
+      "get": {
+        "operationId": "YaraController_getRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIExecutionRunResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Poll the authoritative AI execution run state",
+        "tags": [
+          "yara"
+        ]
+      }
+    },
+    "/ai-runs/{id}/cancel": {
+      "post": {
+        "operationId": "YaraController_cancelRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIExecutionRunResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Cancel a pending or running execution without treating disconnect as cancel",
+        "tags": [
+          "yara"
+        ]
+      }
+    },
+    "/ai-runs/{id}/events": {
+      "get": {
+        "operationId": "YaraController_streamRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "last-event-id",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Stream replayable Yara-owned run events using SSE sequence cursors",
+        "tags": [
+          "yara"
+        ]
+      }
     }
   },
   "info": {
@@ -563,6 +785,263 @@
           "title",
           "artists",
           "albumContexts"
+        ]
+      },
+      "ConversationMessageDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "conversationId": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "number"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "committed"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "conversationId",
+          "sequence",
+          "role",
+          "content",
+          "status",
+          "createdAt"
+        ]
+      },
+      "YaraConversationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationMessageDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "messages"
+        ]
+      },
+      "CreateConversationResponseDto": {
+        "type": "object",
+        "properties": {
+          "conversation": {
+            "$ref": "#/components/schemas/YaraConversationDto"
+          }
+        },
+        "required": [
+          "conversation"
+        ]
+      },
+      "YaraConversationSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "title": {
+            "type": "string"
+          },
+          "preview": {
+            "type": "string"
+          },
+          "messageCount": {
+            "type": "number",
+            "minimum": 1
+          },
+          "lastMessageRole": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "updatedAt",
+          "title",
+          "preview",
+          "messageCount",
+          "lastMessageRole"
+        ]
+      },
+      "ListConversationsResponseDto": {
+        "type": "object",
+        "properties": {
+          "conversations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/YaraConversationSummaryDto"
+            }
+          }
+        },
+        "required": [
+          "conversations"
+        ]
+      },
+      "SendConversationMessageDto": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "example": "Why does this song feel so spacious?"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "SendConversationMessageResponseDto": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string"
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId",
+          "messageId",
+          "runId"
+        ]
+      },
+      "AIExecutionFailureDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "AIExecutionRunDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "conversationId": {
+            "type": "string"
+          },
+          "triggerMessageId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "failure": {
+            "$ref": "#/components/schemas/AIExecutionFailureDto"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "conversationId",
+          "triggerMessageId",
+          "status",
+          "provider",
+          "model",
+          "createdAt"
+        ]
+      },
+      "AIExecutionRunResponseDto": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/AIExecutionRunDto"
+          },
+          "assistantMessage": {
+            "$ref": "#/components/schemas/ConversationMessageDto"
+          }
+        },
+        "required": [
+          "run"
         ]
       }
     }

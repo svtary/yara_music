@@ -2,7 +2,7 @@
 
 > 定位：这是当前仓库的学习地图，解释 **How this codebase actually works**。它不是新的 Architecture Specification；发生冲突时，`docs/technical/Yara-Technical-Design.md`、Accepted ADR 与冻结产品文档仍具有更高优先级。
 >
-> 当前代码状态：Stage 0 与 Stage 1 已实现；Catalog 使用 Artist/Album/Recording semantics，MusicBrainz/Cover Art Archive ingestion、PostgreSQL Search projection、Catalog Detail API，以及响应式 Explore/Search + Detail Web vertical slice 已落地。
+> 当前代码状态：Stage 0–2 已实现；除 Catalog/Search/Detail 外，Yara Conversation、独立 AIExecutionRun、OpenAI Model Adapter、SSE replay/poll fallback 与响应式 Ask Yara Web vertical slice 已落地。
 
 ## 1. 先看全局：运行中的系统与代码中的边界
 
@@ -14,6 +14,8 @@ Browser
 Next.js Web / BFF
    ↓ HTTP（Web server 发出）
 NestJS API on Fastify :4000
+   ├─ Conversation Application → controlled AgentRuntimePort → ModelProviderPort
+   ├─ SSE / poll → persisted Yara-owned run events
    ↓
 PostgreSQL Adapter（Kysely + pg Pool）
    ↓
@@ -74,19 +76,20 @@ Web 不直接操作 PostgreSQL，因为浏览器不能安全持有数据库凭�
 │   ├── worker/               # 独立后台进程（当前仅 health skeleton）
 │   └── catalog-cli/          # 受控 Provider ingestion / projection rebuild entry point
 ├── packages/
-│   ├── contracts/            # Health + Catalog 跨 transport contract / OpenAPI
+│   ├── contracts/            # Health + Catalog + Conversation/Run transport contract / OpenAPI
 │   ├── config/               # Zod typed environment config
-│   ├── application/          # Catalog ingestion / Search / Detail use cases 与 ports
+│   ├── application/          # Catalog 与 Conversation execution 编排 / ports
 │   ├── adapters-postgres/    # Kysely/pg、迁移与 PostgreSQL probe
 │   ├── adapters-musicbrainz/ # Provider HTTP/DTO/normalization ACL
-│   ├── ai-runtime/           # 非权威 AI execution boundary skeleton
+│   ├── adapters-openai/      # OpenAI Responses ACL / streaming normalization
+│   ├── ai-runtime/           # 非权威 AI execution run / runtime / provider ports
 │   ├── domain-catalog/       # 当前真实实现的 Catalog Domain
 │   ├── domain-identity/      # 仅 owner boundary skeleton
 │   ├── domain-knowledge/     # 仅 owner boundary skeleton
 │   ├── domain-collection/    # 仅 owner boundary skeleton
 │   ├── domain-memory/        # 仅 owner boundary skeleton
 │   ├── domain-personalization/ # 仅 owner boundary skeleton
-│   └── domain-yara-interaction/ # 仅 owner boundary skeleton
+│   └── domain-yara-interaction/ # Conversation / committed message owner
 ├── scripts/
 │   ├── check-architecture.mjs
 │   └── check-context.mjs
@@ -103,23 +106,25 @@ Web 不直接操作 PostgreSQL，因为浏览器不能安全持有数据库凭�
 
 | App                | 进程与启动者                                                | 主要依赖                                                | 当前能做什么                                                | 不能做什么                                                       |
 | ------------------ | ----------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
-| `apps/web`         | `next dev` 或 standalone Node server；本机/pnpm/Docker 启动 | Next.js、React、AntD、TanStack Query、config、contracts | Explore/Search、Catalog Detail；通过 Route Handler 代理 API | 不直连 DB；不拥有 Domain mutation/final AuthZ                    |
-| `apps/api`         | Node 进程；Nest bootstrap，Fastify 处理 HTTP                | NestJS、Fastify、Swagger、Application、Postgres adapter | health、Search、Catalog Detail、OpenAPI                     | 不调用 MusicBrainz；Controller 不是 Domain/Search authority      |
+| `apps/web`         | `next dev` 或 standalone Node server；本机/pnpm/Docker 启动 | Next.js、React、AntD、TanStack Query、config、contracts | Explore/Detail 与 Ask Yara；通过 Route Handler 代理 API/SSE | 不直连 DB；不拥有 canonical mutation/final AuthZ                 |
+| `apps/api`         | Node 进程；Nest bootstrap，Fastify 处理 HTTP                | NestJS、Fastify、Swagger、Application、adapters         | health、Catalog、Conversation、AI Run/SSE/poll、OpenAPI     | Controller/BFF/AI Runtime 都不是 Domain authority                |
 | `apps/worker`      | 独立 Node HTTP 进程                                         | config、contracts、Postgres adapter                     | live/ready health                                           | 尚无 pg-boss/job；不能绕过 Application/owner boundary 写任意数据 |
 | `apps/catalog-cli` | 短生命周期 Node CLI                                         | Application、Provider/Postgres adapters、typed config   | 按 Provider ID 导入；显式 rebuild Search                    | 不是公开 HTTP ingestion endpoint；不提供产品 Search              |
 
 ### 2.2 Core Packages
 
-| Package                | 当前职责                                                                     | 状态                               |
-| ---------------------- | ---------------------------------------------------------------------------- | ---------------------------------- |
-| `contracts`            | Health 与 Catalog HTTP transport types、service vocabulary、OpenAPI artifact | Stage 1 contracts 已实现           |
-| `config`               | 将无类型 `process.env` 校验、转换成 Web/API/Worker/Provider typed config     | 已实现                             |
-| `application`          | Catalog ingestion 编排、Search/Detail queries 与最小 typed ports             | 已实现                             |
-| `domain-catalog`       | canonical Artist/Album/Recording、typed identity、ProviderMapping invariants | Stage 1 foundation 已实现          |
-| 其他 `domain-*`        | 预留 owner/package 边界                                                      | capability 未实现                  |
-| `adapters-postgres`    | Catalog query/write、Search projection/query、Detail read、迁移与 fixtures   | Tasks 1.3–1.4 已实现               |
-| `adapters-musicbrainz` | MusicBrainz/CAA client、DTO 与 ACL normalization                             | Task 1.3.5 已实现                  |
-| `ai-runtime`           | 非权威 AI execution 边界                                                     | skeleton；没有 Agent/LLM/RAG/Tools |
+| Package                   | 当前职责                                                                     | 状态                               |
+| ------------------------- | ---------------------------------------------------------------------------- | ---------------------------------- |
+| `contracts`               | Health、Catalog、Conversation/Run HTTP types 与 OpenAPI artifact             | Stage 2 contracts 已实现           |
+| `config`                  | 将无类型 `process.env` 校验、转换成 Web/API/Worker/Provider typed config     | 已实现                             |
+| `application`             | Catalog use cases 与 Conversation/run/context 编排、typed ports              | Stage 2 scope 已实现               |
+| `domain-catalog`          | canonical Artist/Album/Recording、typed identity、ProviderMapping invariants | Stage 1 foundation 已实现          |
+| `domain-yara-interaction` | Conversation 与 committed message invariant                                  | Stage 2 foundation 已实现          |
+| 其他 `domain-*`           | 预留 owner/package 边界                                                      | capability 未实现                  |
+| `adapters-postgres`       | Catalog query/write、Search projection/query、Detail read、迁移与 fixtures   | Tasks 1.3–1.4 已实现               |
+| `adapters-musicbrainz`    | MusicBrainz/CAA client、DTO 与 ACL normalization                             | Task 1.3.5 已实现                  |
+| `adapters-openai`         | OpenAI Responses streaming normalization 与安全错误映射                      | Stage 2 Model Adapter 已实现       |
+| `ai-runtime`              | 独立 AIExecutionRun、ModelProviderPort、受控 AgentRuntimePort                | Stage 2 execution mechanics 已实现 |
 
 ### 2.3 Engineering / Infrastructure
 
@@ -525,22 +530,29 @@ API/Web smoke
 
 OpenAPI 是 HTTP API 的 machine-readable 描述：路径、method、status、schema。Nest 的 Swagger decorators 和 application metadata 经 `generate-openapi.ts` 产生 `packages/contracts/openapi/yara.openapi.json`。
 
-当前 artifact 包含 `/health/*`、`/search`、`/artists/{id}`、`/albums/{id}`、`/recordings/{id}`；Search response 用 discriminator 定义 Artist/Album/Recording union。Web 通过 `@yara/contracts` 的显式 transport types、运行时 response guard 与 Next BFF 消费这些 endpoints；UI 不直接读取 OpenAPI JSON，也不暴露 DB row。
+当前 artifact 还包含 Conversation create/read/send、AI Run poll/cancel 与 SSE endpoint；Web 通过显式 transport types 与 Next BFF 消费这些 endpoints，且不会直接暴露 DB row、provider SDK type 或 raw provider failure。
 
 生成文件不必逐行读：优先检查 endpoint/schema/status 的语义 diff，以及它是否与 source controller/DTO 改动一致。
 
-## 21. AI Runtime Skeleton
+## 21. AI Runtime 与 Conversation
 
-`packages/ai-runtime/src/index.ts` 只有注释与 `export {}`。它表示“非权威 execution mechanics 应有独立边界”，不表示已经实现：
+`domain-yara-interaction` 拥有 `YaraConversation` 和 committed message；`ai-runtime` 拥有非权威 execution mechanics 与独立 `AIExecutionRun`。Application 先提交 user message 和 pending run，再调用 `AgentRuntimePort → ModelProviderPort`；只有 provider 正常完成后才由 Yara Interaction owner 事务性提交 assistant message。Partial delta 只进入 replayable run-event log，不是 durable Conversation message。
 
-- Agent；
-- LLM/Model Provider；
-- RAG/Retrieval；
-- typed Tool Calling；
-- Structured Output；
-- Recommendation 或 Memory。
+`AgentRuntimePort != ModelProviderPort`：当前前者只是受控 pass-through，并未引入 planning、tools 或 agent autonomy。`adapters-openai` 把 Responses API event 转为 Yara event，并屏蔽 SDK types/raw failure。bounded recent context 只服务本次执行，`Context Compaction != Memory creation`。
 
-未来这里会放受控 runtime、execution/session mechanics、provider-facing execution ports 等，但仍不能直接写 Memory/Taste/Knowledge/Collection 或拥有 Domain truth。具体实现必须等待对应 Stage。
+```text
+POST committed user message + pending AIExecutionRun
+  ↓ Application execution orchestration
+bounded recent Conversation context
+  ↓ AgentRuntimePort（Stage 2 pass-through）
+ModelProviderPort → OpenAI adapter / disabled adapter
+  ↓ Yara-owned run events
+SSE with sequence ID / Last-Event-ID replay
+  ├─ success → committed assistant message + completed run
+  └─ failure/cancel → terminal run only; no fake assistant message
+```
+
+Stage 2 仍没有 RAG/Retrieval、citations、typed Tool Calling、StructuredResult commit、Recommendation、Taste 或 Memory；这些不能从 Conversation 代码旁路提前加入。
 
 ## 22. 当前 Catalog Search / Detail 请求链路
 

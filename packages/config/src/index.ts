@@ -5,14 +5,36 @@ const logLevel = z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']);
 const port = z.coerce.number().int().min(1).max(65_535);
 const databaseUrl = z.string().url().startsWith('postgresql://');
 const providerUrl = z.string().url();
+const modelProvider = z.enum(['disabled', 'openai']);
 
-const apiEnvironmentSchema = z.object({
-  NODE_ENV: nodeEnvironment.default('development'),
-  API_HOST: z.string().min(1).default('0.0.0.0'),
-  API_PORT: port.default(4000),
-  DATABASE_URL: databaseUrl,
-  LOG_LEVEL: logLevel.default('info'),
-});
+const optionalNonEmptyString = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().min(1).optional(),
+);
+
+const apiEnvironmentSchema = z
+  .object({
+    NODE_ENV: nodeEnvironment.default('development'),
+    API_HOST: z.string().min(1).default('0.0.0.0'),
+    API_PORT: port.default(4000),
+    DATABASE_URL: databaseUrl,
+    LOG_LEVEL: logLevel.default('info'),
+    MODEL_PROVIDER: modelProvider.default('disabled'),
+    MODEL_NAME: z.string().min(1).default('gpt-5-mini'),
+    MODEL_API_KEY: optionalNonEmptyString,
+    MODEL_BASE_URL: optionalNonEmptyString.pipe(z.string().url().optional()),
+    MODEL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+    YARA_ACTOR_REF: z.string().min(1).max(256).default('user:yara:local'),
+  })
+  .superRefine((value, context) => {
+    if (value.MODEL_PROVIDER === 'openai' && !value.MODEL_API_KEY) {
+      context.addIssue({
+        code: 'custom',
+        path: ['MODEL_API_KEY'],
+        message: 'MODEL_API_KEY is required when MODEL_PROVIDER=openai.',
+      });
+    }
+  });
 
 const workerEnvironmentSchema = z.object({
   NODE_ENV: nodeEnvironment.default('development'),
@@ -45,6 +67,12 @@ export interface ApiConfig {
   readonly port: number;
   readonly databaseUrl: string;
   readonly logLevel: z.infer<typeof logLevel>;
+  readonly modelProvider: z.infer<typeof modelProvider>;
+  readonly modelName: string;
+  readonly modelApiKey?: string;
+  readonly modelBaseUrl?: string;
+  readonly modelTimeoutMs: number;
+  readonly yaraActorRef: string;
 }
 
 export interface WorkerConfig {
@@ -77,6 +105,12 @@ export function readApiConfig(environment: NodeJS.ProcessEnv): ApiConfig {
     port: value.API_PORT,
     databaseUrl: value.DATABASE_URL,
     logLevel: value.LOG_LEVEL,
+    modelProvider: value.MODEL_PROVIDER,
+    modelName: value.MODEL_NAME,
+    ...(value.MODEL_API_KEY ? { modelApiKey: value.MODEL_API_KEY } : {}),
+    ...(value.MODEL_BASE_URL ? { modelBaseUrl: value.MODEL_BASE_URL } : {}),
+    modelTimeoutMs: value.MODEL_TIMEOUT_MS,
+    yaraActorRef: value.YARA_ACTOR_REF,
   };
 }
 

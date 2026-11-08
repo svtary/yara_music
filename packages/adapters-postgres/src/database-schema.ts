@@ -1,5 +1,8 @@
 import type { AlbumContextSummary, ArtistSummary } from '@yara/application';
 import type { CatalogEntityKind, ProviderMappingStatus } from '@yara/domain-catalog';
+import type { AIExecutionFailure, AIExecutionRunStatus, ModelUsage } from '@yara/ai-runtime';
+import type { ConversationMessageRole, ConversationStatus } from '@yara/domain-yara-interaction';
+import type { YaraRunEvent } from '@yara/application';
 
 export interface CatalogArtistTable {
   id: string;
@@ -85,6 +88,49 @@ export interface CatalogSearchDocumentTable {
   updated_at: Date;
 }
 
+export interface YaraConversationTable {
+  id: string;
+  owner_ref: string;
+  status: ConversationStatus;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface YaraConversationMessageTable {
+  id: string;
+  conversation_id: string;
+  sequence: number;
+  role: ConversationMessageRole;
+  status: 'committed';
+  content: string;
+  created_at: Date;
+}
+
+export interface YaraAIExecutionRunTable {
+  id: string;
+  conversation_id: string;
+  trigger_message_id: string;
+  assistant_message_id: string | null;
+  status: AIExecutionRunStatus;
+  provider: string;
+  model: string;
+  provider_response_id: string | null;
+  usage: ModelUsage | null;
+  failure: AIExecutionFailure | null;
+  created_at: Date;
+  started_at: Date | null;
+  finished_at: Date | null;
+  updated_at: Date;
+}
+
+export interface YaraAIExecutionRunEventTable {
+  run_id: string;
+  sequence: number;
+  event_type: YaraRunEvent['type'];
+  payload: YaraRunEvent;
+  created_at: Date;
+}
+
 /** Kysely row types remain adapter-local and never become Domain entities. */
 export interface YaraDatabase {
   'catalog.artists': CatalogArtistTable;
@@ -96,4 +142,8 @@ export interface YaraDatabase {
   'catalog.provider_mappings': CatalogProviderMappingTable;
   'catalog.provider_mapping_candidates': CatalogProviderMappingCandidateTable;
   'search.catalog_documents': CatalogSearchDocumentTable;
+  'yara_interaction.conversations': YaraConversationTable;
+  'yara_interaction.conversation_messages': YaraConversationMessageTable;
+  'yara_interaction.ai_execution_runs': YaraAIExecutionRunTable;
+  'yara_interaction.ai_execution_run_events': YaraAIExecutionRunEventTable;
 }
