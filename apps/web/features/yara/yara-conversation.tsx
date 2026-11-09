@@ -12,7 +12,7 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 
 import { cancelRun, getConversation, getRun, sendConversationMessage } from './yara-api';
 import { YaraSseDecoder } from './sse-decoder';
-import { yaraConversationHref } from './yara-routes';
+import { resolveResumableRunId, yaraConversationHref } from './yara-routes';
 
 type TransportMode = 'idle' | 'streaming' | 'reconnecting' | 'polling';
 const terminalStatuses = new Set<AIExecutionRunStatusContract>([
@@ -56,6 +56,7 @@ export function YaraConversation() {
   const [initializing, setInitializing] = useState(true);
   const [lastSent, setLastSent] = useState('');
   const streamAbort = useRef<AbortController | null>(null);
+  const pendingSend = useRef<{ content: string; key: string } | null>(null);
   const lastEventId = useRef(0);
   const [lastEventSequence, setLastEventSequence] = useState(0);
 
@@ -68,16 +69,36 @@ export function YaraConversation() {
   const pollUntilTerminal = useCallback(
     async (conversationId: string, runId: string, signal: AbortSignal): Promise<void> => {
       setTransport('polling');
+      const deadline = Date.now() + 120_000;
+      let delayMs = 750;
       while (!signal.aborted) {
-        const nextRun = await getRun(runId);
-        setRun(nextRun);
-        if (isTerminal(nextRun.run.status)) {
-          await refreshConversation(conversationId);
-          setPartial('');
-          setTransport('idle');
-          return;
+        if (Date.now() >= deadline) {
+          throw new Error('poll_observation_window_exceeded');
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 750));
+        try {
+          const nextRun = await getRun(runId);
+          setRun(nextRun);
+          if (isTerminal(nextRun.run.status)) {
+            await refreshConversation(conversationId);
+            setPartial('');
+            setTransport('idle');
+            return;
+          }
+          delayMs = 750;
+        } catch {
+          delayMs = Math.min(delayMs * 2, 5_000);
+        }
+        await new Promise<void>((resolve) => {
+          const timer = window.setTimeout(resolve, delayMs);
+          signal.addEventListener(
+            'abort',
+            () => {
+              window.clearTimeout(timer);
+              resolve();
+            },
+            { once: true },
+          );
+        });
       }
     },
     [refreshConversation],
@@ -142,7 +163,16 @@ export function YaraConversation() {
         }
       }
       if (!controller.signal.aborted) {
-        await pollUntilTerminal(conversationId, runId, controller.signal);
+        try {
+          await pollUntilTerminal(conversationId, runId, controller.signal);
+        } catch {
+          if (!controller.signal.aborted) {
+            setTransport('idle');
+            setError(
+              'Yara is still working, but the connection could not be confirmed. Retry to check the saved run.',
+            );
+          }
+        }
       }
     },
     [pollUntilTerminal, refreshConversation],
@@ -162,11 +192,17 @@ export function YaraConversation() {
         const current = await getConversation(initialConversationId);
         if (disposed) return;
         setConversation(current);
-        if (initialRunId) {
-          const currentRun = await getRun(initialRunId);
+        const resumableRunId = resolveResumableRunId(initialRunId, current);
+        if (resumableRunId) {
+          const currentRun = await getRun(resumableRunId);
           if (disposed) return;
           setRun(currentRun);
-          if (!isTerminal(currentRun.run.status)) void streamRun(current.id, initialRunId);
+          if (!isTerminal(currentRun.run.status)) {
+            if (!initialRunId) {
+              router.replace(yaraConversationHref(current.id, resumableRunId), { scroll: false });
+            }
+            void streamRun(current.id, resumableRunId);
+          }
         }
       } catch {
         if (!disposed) setError('Yara could not open this conversation. Please try again.');
@@ -179,7 +215,7 @@ export function YaraConversation() {
       disposed = true;
       streamAbort.current?.abort();
     };
-  }, [initialConversationId, initialRunId, streamRun]);
+  }, [initialConversationId, initialRunId, router, streamRun]);
 
   const active = run !== null && !isTerminal(run.run.status);
 
@@ -193,16 +229,36 @@ export function YaraConversation() {
     setError(null);
     lastEventId.current = 0;
     setLastEventSequence(0);
+    const command =
+      pendingSend.current?.content === content
+        ? pendingSend.current
+        : { content, key: `send:${crypto.randomUUID()}` };
+    pendingSend.current = command;
     try {
-      const receipt = await sendConversationMessage(conversation.id, content);
+      const receipt = await sendConversationMessage(conversation.id, content, command.key);
+      pendingSend.current = null;
       await refreshConversation(conversation.id);
       const nextRun = await getRun(receipt.runId);
       setRun(nextRun);
       router.replace(yaraConversationHref(conversation.id, receipt.runId), { scroll: false });
       void streamRun(conversation.id, receipt.runId);
-    } catch {
+    } catch (cause) {
       setDraft(content);
-      setError('Your message was not sent. Nothing was committed—please try again.');
+      if (cause instanceof Error && cause.message === 'command_conflict') {
+        const current = await refreshConversation(conversation.id).catch(() => null);
+        if (current?.activeRun) {
+          const currentRun = await getRun(current.activeRun.id).catch(() => null);
+          if (currentRun) {
+            setRun(currentRun);
+            void streamRun(conversation.id, current.activeRun.id);
+          }
+        }
+        setError('Yara is already working on this conversation. The saved run has been restored.');
+      } else {
+        setError(
+          'Yara could not confirm this send yet. Your message is safe—retry to check the same request.',
+        );
+      }
     }
   }
 

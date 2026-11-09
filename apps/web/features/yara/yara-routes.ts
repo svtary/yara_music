@@ -1,4 +1,5 @@
 import type { YaraConversationSummaryContract } from '@yara/contracts';
+import type { YaraConversationContract } from '@yara/contracts';
 
 export function yaraConversationHref(conversationId: string, runId?: string): string {
   const query = new URLSearchParams({ conversation: conversationId });
@@ -8,6 +9,13 @@ export function yaraConversationHref(conversationId: string, runId?: string): st
 
 export function resolveYaraSurface(conversationId: string | null): 'home' | 'conversation' {
   return conversationId ? 'conversation' : 'home';
+}
+
+export function resolveResumableRunId(
+  routeRunId: string | null,
+  conversation: YaraConversationContract,
+): string | null {
+  return routeRunId ?? conversation.activeRun?.id ?? null;
 }
 
 export function meaningfulRecentConversation(

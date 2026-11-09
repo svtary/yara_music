@@ -18,10 +18,16 @@ describe('typed environment configuration', () => {
       logLevel: 'info',
       modelProvider: 'disabled',
       modelName: 'gpt-5-mini',
-      modelTimeoutMs: 30_000,
       yaraActorRef: 'user:yara:local',
     });
-    expect(readWorkerConfig({ DATABASE_URL: databaseUrl }).healthPort).toBe(4001);
+    expect(readWorkerConfig({ DATABASE_URL: databaseUrl })).toMatchObject({
+      healthPort: 4001,
+      modelProvider: 'disabled',
+      workerId: 'worker:local',
+      jobPollMs: 500,
+      jobLeaseMs: 45_000,
+      jobHeartbeatMs: 10_000,
+    });
     expect(readWebConfig({})).toMatchObject({
       nodeEnv: 'development',
       apiBaseUrl: 'http://localhost:4000',
@@ -41,8 +47,15 @@ describe('typed environment configuration', () => {
   it('rejects invalid critical values', () => {
     expect(() => readApiConfig({ DATABASE_URL: 'not-a-url', API_PORT: '0' })).toThrow();
     expect(() => readCatalogProviderConfig({ MUSICBRAINZ_REQUEST_INTERVAL_MS: '999' })).toThrow();
-    expect(() => readApiConfig({ DATABASE_URL: databaseUrl, MODEL_PROVIDER: 'openai' })).toThrow(
+    expect(() => readWorkerConfig({ DATABASE_URL: databaseUrl, MODEL_PROVIDER: 'openai' })).toThrow(
       /MODEL_API_KEY/,
     );
+    expect(() =>
+      readWorkerConfig({
+        DATABASE_URL: databaseUrl,
+        AI_JOB_LEASE_MS: '5000',
+        AI_JOB_HEARTBEAT_MS: '5000',
+      }),
+    ).toThrow(/AI_JOB_HEARTBEAT_MS/);
   });
 });

@@ -10,43 +10,6 @@ export class ConversationMessageDto {
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
 }
 
-export class YaraConversationDto {
-  @ApiProperty() id!: string;
-  @ApiProperty({ enum: ['active', 'archived'] }) status!: 'active' | 'archived';
-  @ApiProperty({ format: 'date-time' }) createdAt!: string;
-  @ApiProperty({ format: 'date-time' }) updatedAt!: string;
-  @ApiProperty({ type: () => [ConversationMessageDto] }) messages!: ConversationMessageDto[];
-}
-
-export class CreateConversationResponseDto {
-  @ApiProperty({ type: () => YaraConversationDto }) conversation!: YaraConversationDto;
-}
-
-export class YaraConversationSummaryDto {
-  @ApiProperty() id!: string;
-  @ApiProperty({ format: 'date-time' }) updatedAt!: string;
-  @ApiProperty() title!: string;
-  @ApiProperty() preview!: string;
-  @ApiProperty({ minimum: 1 }) messageCount!: number;
-  @ApiProperty({ enum: ['user', 'assistant'] }) lastMessageRole!: 'user' | 'assistant';
-}
-
-export class ListConversationsResponseDto {
-  @ApiProperty({ type: () => [YaraConversationSummaryDto] })
-  conversations!: YaraConversationSummaryDto[];
-}
-
-export class SendConversationMessageDto {
-  @ApiProperty({ minLength: 1, maxLength: 4000, example: 'Why does this song feel so spacious?' })
-  content!: string;
-}
-
-export class SendConversationMessageResponseDto {
-  @ApiProperty() conversationId!: string;
-  @ApiProperty() messageId!: string;
-  @ApiProperty() runId!: string;
-}
-
 export class AIExecutionFailureDto {
   @ApiProperty() code!: string;
   @ApiProperty() message!: string;
@@ -64,6 +27,49 @@ export class AIExecutionRunDto {
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
   @ApiPropertyOptional({ format: 'date-time' }) startedAt?: string;
   @ApiPropertyOptional({ format: 'date-time' }) finishedAt?: string;
+}
+
+export class YaraConversationDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ enum: ['active', 'archived'] }) status!: 'active' | 'archived';
+  @ApiProperty({ format: 'date-time' }) createdAt!: string;
+  @ApiProperty({ format: 'date-time' }) updatedAt!: string;
+  @ApiProperty({ type: () => [ConversationMessageDto] }) messages!: ConversationMessageDto[];
+  @ApiPropertyOptional({ type: () => AIExecutionRunDto }) activeRun?: AIExecutionRunDto;
+}
+
+export class CreateConversationResponseDto {
+  @ApiProperty({ type: () => YaraConversationDto }) conversation!: YaraConversationDto;
+}
+
+export class YaraConversationSummaryDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ format: 'date-time' }) updatedAt!: string;
+  @ApiProperty() title!: string;
+  @ApiProperty() preview!: string;
+  @ApiProperty({ minimum: 1 }) messageCount!: number;
+  @ApiProperty({ enum: ['user', 'assistant'] }) lastMessageRole!: 'user' | 'assistant';
+  @ApiPropertyOptional() activeRunId?: string;
+  @ApiPropertyOptional({ enum: ['pending', 'running'] }) activeRunStatus?: 'pending' | 'running';
+}
+
+export class ListConversationsResponseDto {
+  @ApiProperty({ type: () => [YaraConversationSummaryDto] })
+  conversations!: YaraConversationSummaryDto[];
+}
+
+export class SendConversationMessageDto {
+  @ApiProperty({ minLength: 1, maxLength: 4000, example: 'Why does this song feel so spacious?' })
+  content!: string;
+  @ApiProperty({ minLength: 8, maxLength: 200 }) idempotencyKey!: string;
+}
+
+export class StartConversationDto extends SendConversationMessageDto {}
+
+export class SendConversationMessageResponseDto {
+  @ApiProperty() conversationId!: string;
+  @ApiProperty() messageId!: string;
+  @ApiProperty() runId!: string;
 }
 
 export class AIExecutionRunResponseDto {

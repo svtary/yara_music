@@ -1,5 +1,4 @@
 import { Module, type DynamicModule, type OnModuleDestroy } from '@nestjs/common';
-import { OpenAIModelProviderAdapter } from '@yara/adapters-openai';
 import { createPostgresDatabase, type YaraDatabase } from '@yara/adapters-postgres';
 import {
   PostgresCatalogDetailAdapter,
@@ -8,17 +7,9 @@ import {
 } from '@yara/adapters-postgres/catalog';
 import { PostgresYaraInteractionAdapter } from '@yara/adapters-postgres/yara-interaction';
 import {
-  ControlledAgentRuntime,
-  UnavailableModelProvider,
-  type AgentRuntimePort,
-} from '@yara/ai-runtime';
-import {
   CatalogDetailQuery,
   ConversationApplicationService,
-  ConversationExecutionService,
   SearchCatalogQuery,
-  type AIExecutionObservation,
-  type AIExecutionObserverPort,
   type YaraInteractionPersistencePort,
 } from '@yara/application';
 import type { ApiConfig } from '@yara/config';
@@ -30,13 +21,11 @@ import { HealthService } from './health.service.js';
 import { SearchController } from './search.controller.js';
 import { YaraController } from './yara.controller.js';
 import {
-  AGENT_RUNTIME,
   API_CONFIG,
   CATALOG_DETAIL_QUERY,
   CATALOG_QUERY_PORT,
   DATABASE,
   CONVERSATION_APPLICATION,
-  CONVERSATION_EXECUTION,
   SEARCH_CATALOG_QUERY,
   YARA_INTERACTION_PERSISTENCE,
 } from './tokens.js';
@@ -49,12 +38,6 @@ class DatabaseLifecycle implements OnModuleDestroy {
   }
 }
 
-class SafeExecutionObserver implements AIExecutionObserverPort {
-  public record(observation: AIExecutionObservation): void {
-    console.info(JSON.stringify({ event: 'ai.execution', ...observation }));
-  }
-}
-
 @Module({})
 export class AppModule {
   public static register(config: ApiConfig): DynamicModule {
@@ -63,7 +46,6 @@ export class AppModule {
       controllers: [HealthController, SearchController, CatalogController, YaraController],
       providers: [
         HealthService,
-        SafeExecutionObserver,
         { provide: API_CONFIG, useValue: config },
         {
           provide: DATABASE,
@@ -76,20 +58,6 @@ export class AppModule {
             new PostgresYaraInteractionAdapter(database),
         },
         {
-          provide: AGENT_RUNTIME,
-          useFactory: (): AgentRuntimePort => {
-            const provider =
-              config.modelProvider === 'openai' && config.modelApiKey
-                ? new OpenAIModelProviderAdapter({
-                    apiKey: config.modelApiKey,
-                    timeoutMs: config.modelTimeoutMs,
-                    ...(config.modelBaseUrl ? { baseURL: config.modelBaseUrl } : {}),
-                  })
-                : new UnavailableModelProvider();
-            return new ControlledAgentRuntime(provider);
-          },
-        },
-        {
           provide: CONVERSATION_APPLICATION,
           inject: [YARA_INTERACTION_PERSISTENCE],
           useFactory: (persistence: YaraInteractionPersistencePort) =>
@@ -97,15 +65,6 @@ export class AppModule {
               provider: config.modelProvider,
               model: config.modelName,
             }),
-        },
-        {
-          provide: CONVERSATION_EXECUTION,
-          inject: [YARA_INTERACTION_PERSISTENCE, AGENT_RUNTIME, SafeExecutionObserver],
-          useFactory: (
-            persistence: YaraInteractionPersistencePort,
-            runtime: AgentRuntimePort,
-            observer: AIExecutionObserverPort,
-          ) => new ConversationExecutionService(persistence, runtime, observer),
         },
         {
           provide: CATALOG_QUERY_PORT,

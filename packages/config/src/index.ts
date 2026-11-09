@@ -12,11 +12,21 @@ const optionalNonEmptyString = z.preprocess(
   z.string().min(1).optional(),
 );
 
-const apiEnvironmentSchema = z
+const apiEnvironmentSchema = z.object({
+  NODE_ENV: nodeEnvironment.default('development'),
+  API_HOST: z.string().min(1).default('0.0.0.0'),
+  API_PORT: port.default(4000),
+  DATABASE_URL: databaseUrl,
+  LOG_LEVEL: logLevel.default('info'),
+  MODEL_PROVIDER: modelProvider.default('disabled'),
+  MODEL_NAME: z.string().min(1).default('gpt-5-mini'),
+  YARA_ACTOR_REF: z.string().min(1).max(256).default('user:yara:local'),
+});
+
+const workerEnvironmentSchema = z
   .object({
     NODE_ENV: nodeEnvironment.default('development'),
-    API_HOST: z.string().min(1).default('0.0.0.0'),
-    API_PORT: port.default(4000),
+    WORKER_HEALTH_PORT: port.default(4001),
     DATABASE_URL: databaseUrl,
     LOG_LEVEL: logLevel.default('info'),
     MODEL_PROVIDER: modelProvider.default('disabled'),
@@ -24,7 +34,10 @@ const apiEnvironmentSchema = z
     MODEL_API_KEY: optionalNonEmptyString,
     MODEL_BASE_URL: optionalNonEmptyString.pipe(z.string().url().optional()),
     MODEL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
-    YARA_ACTOR_REF: z.string().min(1).max(256).default('user:yara:local'),
+    WORKER_ID: z.string().min(1).max(128).default('worker:local'),
+    AI_JOB_POLL_MS: z.coerce.number().int().min(100).max(10_000).default(500),
+    AI_JOB_LEASE_MS: z.coerce.number().int().min(5_000).max(300_000).default(45_000),
+    AI_JOB_HEARTBEAT_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
   })
   .superRefine((value, context) => {
     if (value.MODEL_PROVIDER === 'openai' && !value.MODEL_API_KEY) {
@@ -34,14 +47,14 @@ const apiEnvironmentSchema = z
         message: 'MODEL_API_KEY is required when MODEL_PROVIDER=openai.',
       });
     }
+    if (value.AI_JOB_HEARTBEAT_MS >= value.AI_JOB_LEASE_MS) {
+      context.addIssue({
+        code: 'custom',
+        path: ['AI_JOB_HEARTBEAT_MS'],
+        message: 'AI_JOB_HEARTBEAT_MS must be shorter than AI_JOB_LEASE_MS.',
+      });
+    }
   });
-
-const workerEnvironmentSchema = z.object({
-  NODE_ENV: nodeEnvironment.default('development'),
-  WORKER_HEALTH_PORT: port.default(4001),
-  DATABASE_URL: databaseUrl,
-  LOG_LEVEL: logLevel.default('info'),
-});
 
 const webEnvironmentSchema = z.object({
   NODE_ENV: nodeEnvironment.default('development'),
@@ -69,9 +82,6 @@ export interface ApiConfig {
   readonly logLevel: z.infer<typeof logLevel>;
   readonly modelProvider: z.infer<typeof modelProvider>;
   readonly modelName: string;
-  readonly modelApiKey?: string;
-  readonly modelBaseUrl?: string;
-  readonly modelTimeoutMs: number;
   readonly yaraActorRef: string;
 }
 
@@ -80,6 +90,15 @@ export interface WorkerConfig {
   readonly healthPort: number;
   readonly databaseUrl: string;
   readonly logLevel: z.infer<typeof logLevel>;
+  readonly modelProvider: z.infer<typeof modelProvider>;
+  readonly modelName: string;
+  readonly modelApiKey?: string;
+  readonly modelBaseUrl?: string;
+  readonly modelTimeoutMs: number;
+  readonly workerId: string;
+  readonly jobPollMs: number;
+  readonly jobLeaseMs: number;
+  readonly jobHeartbeatMs: number;
 }
 
 export interface WebConfig {
@@ -107,9 +126,6 @@ export function readApiConfig(environment: NodeJS.ProcessEnv): ApiConfig {
     logLevel: value.LOG_LEVEL,
     modelProvider: value.MODEL_PROVIDER,
     modelName: value.MODEL_NAME,
-    ...(value.MODEL_API_KEY ? { modelApiKey: value.MODEL_API_KEY } : {}),
-    ...(value.MODEL_BASE_URL ? { modelBaseUrl: value.MODEL_BASE_URL } : {}),
-    modelTimeoutMs: value.MODEL_TIMEOUT_MS,
     yaraActorRef: value.YARA_ACTOR_REF,
   };
 }
@@ -121,6 +137,15 @@ export function readWorkerConfig(environment: NodeJS.ProcessEnv): WorkerConfig {
     healthPort: value.WORKER_HEALTH_PORT,
     databaseUrl: value.DATABASE_URL,
     logLevel: value.LOG_LEVEL,
+    modelProvider: value.MODEL_PROVIDER,
+    modelName: value.MODEL_NAME,
+    ...(value.MODEL_API_KEY ? { modelApiKey: value.MODEL_API_KEY } : {}),
+    ...(value.MODEL_BASE_URL ? { modelBaseUrl: value.MODEL_BASE_URL } : {}),
+    modelTimeoutMs: value.MODEL_TIMEOUT_MS,
+    workerId: value.WORKER_ID,
+    jobPollMs: value.AI_JOB_POLL_MS,
+    jobLeaseMs: value.AI_JOB_LEASE_MS,
+    jobHeartbeatMs: value.AI_JOB_HEARTBEAT_MS,
   };
 }
 

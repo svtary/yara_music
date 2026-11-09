@@ -698,12 +698,83 @@ const yaraInteractionFoundationMigration: Migration = {
   },
 };
 
+const yaraInteractionReliabilityMigration: Migration = {
+  async up(database): Promise<void> {
+    await sql`
+      create unique index yara_runs_one_active_per_conversation
+        on yara_interaction.ai_execution_runs (conversation_id)
+        where status in ('pending', 'running');
+
+      create table yara_interaction.ai_execution_jobs (
+        run_id text primary key
+          references yara_interaction.ai_execution_runs(id) on delete restrict,
+        status text not null default 'queued',
+        attempt integer not null default 0 check (attempt >= 0),
+        lease_owner text,
+        lease_expires_at timestamptz,
+        last_error text,
+        created_at timestamptz not null,
+        updated_at timestamptz not null,
+        constraint yara_execution_jobs_status_valid check (
+          status in (
+            'queued', 'claimed', 'completed', 'failed', 'cancelled',
+            'reconciliation_required'
+          )
+        ),
+        constraint yara_execution_jobs_lease_valid check (
+          (status = 'claimed' and lease_owner is not null and lease_expires_at is not null)
+          or (status <> 'claimed' and lease_owner is null and lease_expires_at is null)
+        )
+      );
+
+      create index yara_execution_jobs_claimable
+        on yara_interaction.ai_execution_jobs (status, created_at, run_id);
+      create index yara_execution_jobs_stale_lease
+        on yara_interaction.ai_execution_jobs (lease_expires_at)
+        where status = 'claimed';
+
+      create table yara_interaction.command_idempotency (
+        owner_ref text not null,
+        command_scope text not null,
+        idempotency_key text not null,
+        semantic_fingerprint text not null,
+        conversation_id text not null
+          references yara_interaction.conversations(id) on delete restrict,
+        message_id text not null
+          references yara_interaction.conversation_messages(id) on delete restrict,
+        run_id text not null
+          references yara_interaction.ai_execution_runs(id) on delete restrict,
+        created_at timestamptz not null,
+        primary key (owner_ref, command_scope, idempotency_key),
+        constraint yara_command_scope_valid check (
+          command_scope in ('start_conversation', 'send_message')
+        ),
+        constraint yara_idempotency_key_valid check (
+          length(idempotency_key) between 8 and 200
+          and idempotency_key !~ '[[:cntrl:]]'
+        ),
+        constraint yara_semantic_fingerprint_valid check (
+          semantic_fingerprint ~ '^[0-9a-f]{64}$'
+        )
+      );
+    `.execute(database);
+  },
+  async down(database): Promise<void> {
+    await sql`
+      drop table if exists yara_interaction.command_idempotency;
+      drop table if exists yara_interaction.ai_execution_jobs;
+      drop index if exists yara_interaction.yara_runs_one_active_per_conversation;
+    `.execute(database);
+  },
+};
+
 export type YaraMigrationName =
   | '0001_stage_zero_extensions'
   | '0002_catalog_foundation'
   | '0003_catalog_album_metadata'
   | '0004_catalog_search_projection'
-  | '0005_yara_interaction_foundation';
+  | '0005_yara_interaction_foundation'
+  | '0006_yara_interaction_reliability';
 
 function createYaraMigrator(database: Kysely<YaraDatabase>): Migrator {
   return new Migrator({
@@ -716,6 +787,7 @@ function createYaraMigrator(database: Kysely<YaraDatabase>): Migrator {
           '0003_catalog_album_metadata': catalogAlbumMetadataMigration,
           '0004_catalog_search_projection': catalogSearchProjectionMigration,
           '0005_yara_interaction_foundation': yaraInteractionFoundationMigration,
+          '0006_yara_interaction_reliability': yaraInteractionReliabilityMigration,
         };
       },
     },

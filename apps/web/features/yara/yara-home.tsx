@@ -3,9 +3,9 @@
 import type { YaraConversationSummaryContract } from '@yara/contracts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 
-import { createConversation, listConversations, sendConversationMessage } from './yara-api';
+import { listConversations, startConversation } from './yara-api';
 import {
   meaningfulRecentConversation,
   relativeConversationActivity,
@@ -30,6 +30,7 @@ export function YaraHome() {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingStart = useRef<{ content: string; key: string } | null>(null);
   const recent = meaningfulRecentConversation(conversations);
 
   useEffect(() => {
@@ -54,14 +55,22 @@ export function YaraHome() {
     if (!draft.trim() || submitting) return;
     setSubmitting(true);
     setError(null);
+    const content = draft.trim();
+    const command =
+      pendingStart.current?.content === content
+        ? pendingStart.current
+        : { content, key: `start:${crypto.randomUUID()}` };
+    pendingStart.current = command;
     try {
-      const href = await startConversationFromPrompt(draft, {
-        create: createConversation,
-        send: sendConversationMessage,
+      const href = await startConversationFromPrompt(content, command.key, {
+        start: startConversation,
       });
+      pendingStart.current = null;
       router.push(href);
     } catch {
-      setError('Yara could not start this conversation. Your prompt is still here.');
+      setError(
+        'Yara could not confirm the start yet. Your prompt is safe—retry to check the same request.',
+      );
       setSubmitting(false);
     }
   }

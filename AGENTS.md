@@ -12,6 +12,16 @@ Legacy root paths (`YARA_MASTER_CONTEXT.md`, `DECISIONS.md`, `CURRENT_TASK.md`, 
 
 Current phase: **MVP-0 Implementation**. Current delivery stage is recorded in `PLANS.md`.
 
+## Figma fidelity for user-facing work
+
+Figma is authoritative for user-facing product behavior. Before every user-facing implementation or modification, inspect the relevant approved Mobile and Desktop production frames, identify the exact states involved, and compare the current implementation with those frames. Implement within the existing Figma page structure and interaction model. Do not replace approved navigation, hierarchy, layout, responsive behavior, component placement, interaction semantics, or loading/empty/error/generating/result states with a generic ChatGPT, dashboard, admin, or Ant Design pattern merely because it is easier to code.
+
+- Figma governs page structure, navigation, information and visual hierarchy, component placement, interaction behavior, user-visible states, and responsive Mobile/Desktop behavior.
+- Frozen Technical Design and Accepted ADRs govern Domain ownership, Application/API/persistence boundaries, canonical state, runtime architecture, security, reliability, and stage capability boundaries.
+- If a Figma frame shows a future-stage capability, preserve its intended structure where appropriate but do not fake it with static data or claim it works early. Citation/References begin in Stage 3; Task/StructuredResult in Stage 4; Recommendation/Taste in Stage 5; durable Memory in Stage 6.
+- If Figma and Frozen Technical Design appear to conflict, stop only the affected scope and report the exact conflict. Do not silently choose one side or redesign the product.
+- Every Stage acceptance report must include `Figma Consistency` (frames inspected, surfaces/states implemented, responsive verification, deviations) and `Architecture Consistency` (Technical Design/ADR constraints checked and deviations). “Reference Figma where possible” is not sufficient.
+
 ## Dependency and ownership rules
 
 - Dependencies point inward: delivery/infrastructure adapters → Application ports/use cases → framework-free Domain owners. Domain and Application code must not depend on NestJS, Next.js, database drivers, provider SDKs, or delivery adapters.

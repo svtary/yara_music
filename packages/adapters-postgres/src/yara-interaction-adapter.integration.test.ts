@@ -1,4 +1,9 @@
 import { aiExecutionRunId, createAIExecutionRun } from '@yara/ai-runtime';
+import {
+  ActiveAIExecutionRunConflictError,
+  ConversationApplicationService,
+  IdempotencyConflictError,
+} from '@yara/application';
 import { conversationId, createYaraConversation, messageId } from '@yara/domain-yara-interaction';
 import type { Kysely } from 'kysely';
 import pg from 'pg';
@@ -50,6 +55,8 @@ describePostgres('PostgreSQL Yara Interaction persistence', () => {
     await adapter.createConversation('owner:1', createYaraConversation({ id, createdAt }));
     await adapter.acceptUserMessageAndRun({
       ownerRef: 'owner:1',
+      idempotencyKey: 'send:integration:first',
+      semanticFingerprint: '1'.repeat(64),
       conversationId: id,
       messageId: userMessageId,
       content: 'What makes this feel spacious?',
@@ -84,6 +91,14 @@ describePostgres('PostgreSQL Yara Interaction persistence', () => {
       finishedAt: new Date('2026-11-06T10:00:03.000Z'),
     });
     expect(completed?.run.status).toBe('completed');
+    await expect(
+      adapter.completeRunWithAssistantMessage({
+        runId,
+        messageId: messageId('message:yara:45454545-4545-4545-8545-454545454545'),
+        content: 'A duplicate completion must never be committed.',
+        finishedAt: new Date('2026-11-06T10:00:04.000Z'),
+      }),
+    ).resolves.toBeNull();
     expect((await adapter.getConversationForOwner('owner:1', id))?.messages).toHaveLength(2);
     expect(
       (
@@ -125,6 +140,8 @@ describePostgres('PostgreSQL Yara Interaction persistence', () => {
       const userMessageId = messageId(`message:yara:99999999-9999-4999-8999-99999999999${suffix}`);
       await adapter.acceptUserMessageAndRun({
         ownerRef: owner,
+        idempotencyKey: `send:history:${suffix}`,
+        semanticFingerprint: suffix.repeat(64),
         conversationId: id,
         messageId: userMessageId,
         content: `Question ${suffix}`,
@@ -142,12 +159,172 @@ describePostgres('PostgreSQL Yara Interaction persistence', () => {
     }
 
     expect(
-      (await adapter.listMeaningfulConversationsForOwner('owner:1', 10)).map(({ id }) => id),
+      (await adapter.listConversationSummariesForOwner('owner:1', 10)).map(({ id }) => id),
     ).toEqual([
       newerId,
       olderId,
       conversationId('conversation:yara:11111111-1111-4111-8111-111111111111'),
     ]);
-    expect(await adapter.listMeaningfulConversationsForOwner('owner:missing', 10)).toEqual([]);
+    expect(await adapter.listConversationSummariesForOwner('owner:missing', 10)).toEqual([]);
+  });
+
+  it('rolls back every initial command write when durable run insertion fails', async () => {
+    const createdAt = new Date('2026-11-08T13:00:00.000Z');
+    const id = conversationId('conversation:yara:12121212-1212-4212-8212-121212121212');
+    const userMessageId = messageId('message:yara:34343434-3434-4434-8434-343434343434');
+    const missingConversationId = conversationId(
+      'conversation:yara:56565656-5656-4656-8656-565656565656',
+    );
+
+    await expect(
+      adapter.startConversationWithMessage({
+        ownerRef: 'owner:rollback',
+        idempotencyKey: 'start:rollback-test',
+        semanticFingerprint: 'f'.repeat(64),
+        conversation: createYaraConversation({ id, createdAt }),
+        messageId: userMessageId,
+        content: 'This transaction must roll back.',
+        createdAt,
+        run: createAIExecutionRun({
+          id: aiExecutionRunId('ai-run:yara:78787878-7878-4878-8878-787878787878'),
+          conversationId: missingConversationId,
+          triggerMessageId: userMessageId,
+          status: 'pending',
+          provider: 'test',
+          model: 'test-model',
+          createdAt,
+        }),
+      }),
+    ).rejects.toThrow();
+
+    expect(await adapter.getConversationForOwner('owner:rollback', id)).toBeNull();
+  });
+
+  it('atomically deduplicates commands, enforces one active run, and recovers leased jobs safely', async () => {
+    const cleanupAt = new Date('2026-11-09T00:00:00.000Z');
+    await database
+      .updateTable('yara_interaction.ai_execution_runs')
+      .set({ status: 'cancelled', finished_at: cleanupAt, updated_at: cleanupAt })
+      .where('status', '=', 'pending')
+      .execute();
+    await database
+      .updateTable('yara_interaction.ai_execution_jobs')
+      .set({
+        status: 'cancelled',
+        lease_owner: null,
+        lease_expires_at: null,
+        updated_at: cleanupAt,
+      })
+      .where('status', '=', 'queued')
+      .execute();
+
+    let tick = 0;
+    const application = new ConversationApplicationService(
+      adapter,
+      { provider: 'test', model: 'test-model' },
+      () => new Date(Date.UTC(2026, 10, 9, 10, 0, tick++)),
+    );
+    const initial = await application.start('owner:reliability', 'Start once', 'start:stable-key');
+    expect(await application.start('owner:reliability', 'Start once', 'start:stable-key')).toEqual(
+      initial,
+    );
+    await expect(
+      application.start('owner:reliability', 'Different intent', 'start:stable-key'),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+    expect(
+      Number(
+        (
+          await database
+            .selectFrom('yara_interaction.conversations')
+            .select(({ fn }) => fn.countAll<number>().as('count'))
+            .where('owner_ref', '=', 'owner:reliability')
+            .executeTakeFirstOrThrow()
+        ).count,
+      ),
+    ).toBe(1);
+    await expect(
+      application.send(
+        'owner:reliability',
+        initial.conversationId,
+        'Overlapping message',
+        'send:overlap',
+      ),
+    ).rejects.toBeInstanceOf(ActiveAIExecutionRunConflictError);
+
+    await expect(
+      database
+        .insertInto('yara_interaction.ai_execution_runs')
+        .values({
+          id: 'ai-run:yara:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          conversation_id: initial.conversationId,
+          trigger_message_id: initial.messageId,
+          assistant_message_id: null,
+          status: 'pending',
+          provider: 'test',
+          model: 'test-model',
+          provider_response_id: null,
+          usage: null,
+          failure: null,
+          created_at: cleanupAt,
+          started_at: null,
+          finished_at: null,
+          updated_at: cleanupAt,
+        })
+        .execute(),
+    ).rejects.toThrow();
+
+    await adapter.cancelRunForOwner('owner:reliability', initial.runId, cleanupAt);
+    const concurrent = await Promise.allSettled([
+      application.send(
+        'owner:reliability',
+        initial.conversationId,
+        'Concurrent A',
+        'send:concurrent-a',
+      ),
+      application.send(
+        'owner:reliability',
+        initial.conversationId,
+        'Concurrent B',
+        'send:concurrent-b',
+      ),
+    ]);
+    const successful = concurrent.find(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof application.send>>> =>
+        result.status === 'fulfilled',
+    );
+    const rejected = concurrent.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    expect(successful).toBeDefined();
+    expect(rejected?.reason).toBeInstanceOf(ActiveAIExecutionRunConflictError);
+    const receipt = successful!.value;
+
+    const firstClaim = await adapter.claimNextExecutionJob({
+      workerId: 'worker:test-a',
+      now: new Date('2026-11-09T10:01:00.000Z'),
+      leaseDurationMs: 5_000,
+    });
+    expect(firstClaim?.runId).toBe(receipt.runId);
+    expect(
+      await adapter.recoverStaleExecutionJobs(new Date('2026-11-09T10:01:06.000Z')),
+    ).toMatchObject({ requeued: 1, reconciliationRequired: 0 });
+    const reclaimed = await adapter.claimNextExecutionJob({
+      workerId: 'worker:test-b',
+      now: new Date('2026-11-09T10:01:07.000Z'),
+      leaseDurationMs: 5_000,
+    });
+    expect(reclaimed).toMatchObject({ runId: receipt.runId, attempt: 2 });
+    await adapter.startRun(receipt.runId, new Date('2026-11-09T10:01:08.000Z'));
+    expect(
+      await adapter.recoverStaleExecutionJobs(new Date('2026-11-09T10:01:13.000Z')),
+    ).toMatchObject({ requeued: 0, reconciliationRequired: 1 });
+    expect((await adapter.getRun(receipt.runId))?.run.status).toBe('failed');
+    expect(
+      await adapter.claimNextExecutionJob({
+        workerId: 'worker:test-c',
+        now: new Date('2026-11-09T10:01:14.000Z'),
+        leaseDurationMs: 5_000,
+      }),
+    ).toBeNull();
   });
 });

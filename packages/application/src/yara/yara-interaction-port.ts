@@ -54,6 +54,11 @@ export interface AIExecutionRunView {
   readonly assistantMessage?: ConversationMessage;
 }
 
+export interface YaraConversationView {
+  readonly conversation: YaraConversation;
+  readonly activeRun?: AIExecutionRun;
+}
+
 export interface YaraConversationSummaryView {
   readonly id: ConversationId;
   readonly updatedAt: Date;
@@ -61,6 +66,21 @@ export interface YaraConversationSummaryView {
   readonly preview: string;
   readonly messageCount: number;
   readonly lastMessageRole: 'user' | 'assistant';
+  readonly activeRunId?: AIExecutionRunId;
+  readonly activeRunStatus?: 'pending' | 'running';
+}
+
+export interface ConversationCommandReceipt {
+  readonly conversationId: ConversationId;
+  readonly messageId: MessageId;
+  readonly runId: AIExecutionRunId;
+}
+
+export interface ClaimedAIExecutionJob {
+  readonly runId: AIExecutionRunId;
+  readonly attempt: number;
+  readonly leaseOwner: string;
+  readonly leaseExpiresAt: Date;
 }
 
 export interface YaraInteractionPersistencePort {
@@ -70,18 +90,34 @@ export interface YaraInteractionPersistencePort {
     ownerRef: string,
     conversationId: ConversationId,
   ): Promise<YaraConversation | null>;
-  listMeaningfulConversationsForOwner(
+  getConversationViewForOwner(
+    ownerRef: string,
+    conversationId: ConversationId,
+  ): Promise<YaraConversationView | null>;
+  listConversationSummariesForOwner(
     ownerRef: string,
     limit: number,
-  ): Promise<readonly YaraConversation[]>;
+  ): Promise<readonly YaraConversationSummaryView[]>;
+  startConversationWithMessage(input: {
+    readonly ownerRef: string;
+    readonly idempotencyKey: string;
+    readonly semanticFingerprint: string;
+    readonly conversation: YaraConversation;
+    readonly messageId: MessageId;
+    readonly content: string;
+    readonly createdAt: Date;
+    readonly run: AIExecutionRun;
+  }): Promise<ConversationCommandReceipt>;
   acceptUserMessageAndRun(input: {
     readonly ownerRef: string;
+    readonly idempotencyKey: string;
+    readonly semanticFingerprint: string;
     readonly messageId: MessageId;
     readonly conversationId: ConversationId;
     readonly content: string;
     readonly createdAt: Date;
     readonly run: AIExecutionRun;
-  }): Promise<{ readonly message: ConversationMessage; readonly run: AIExecutionRun }>;
+  }): Promise<ConversationCommandReceipt>;
   getRun(runId: AIExecutionRunId): Promise<AIExecutionRunView | null>;
   getRunForOwner(ownerRef: string, runId: AIExecutionRunId): Promise<AIExecutionRunView | null>;
   startRun(runId: AIExecutionRunId, startedAt: Date): Promise<AIExecutionRun | null>;
@@ -114,6 +150,31 @@ export interface YaraInteractionPersistencePort {
     readonly afterSequence: number;
     readonly limit: number;
   }): Promise<readonly StoredYaraRunEvent[]>;
+}
+
+export interface AIExecutionJobQueuePort {
+  hasPendingExecutionJobs(): Promise<boolean>;
+  recoverStaleExecutionJobs(now: Date): Promise<{
+    readonly requeued: number;
+    readonly reconciliationRequired: number;
+    readonly terminalized: number;
+  }>;
+  claimNextExecutionJob(input: {
+    readonly workerId: string;
+    readonly now: Date;
+    readonly leaseDurationMs: number;
+  }): Promise<ClaimedAIExecutionJob | null>;
+  heartbeatExecutionJob(input: {
+    readonly runId: AIExecutionRunId;
+    readonly workerId: string;
+    readonly now: Date;
+    readonly leaseDurationMs: number;
+  }): Promise<boolean>;
+  settleExecutionJob(input: {
+    readonly runId: AIExecutionRunId;
+    readonly workerId: string;
+    readonly now: Date;
+  }): Promise<boolean>;
 }
 
 export interface AIExecutionObservation {

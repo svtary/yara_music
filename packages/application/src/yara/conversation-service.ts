@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   aiExecutionRunId,
@@ -28,14 +28,18 @@ import {
 import type {
   AIExecutionObserverPort,
   AIExecutionRunView,
+  ConversationCommandReceipt,
   StoredYaraRunEvent,
   YaraInteractionPersistencePort,
   YaraConversationSummaryView,
+  YaraConversationView,
 } from './yara-interaction-port.js';
 
 export class ConversationNotFoundError extends Error {}
 export class AIExecutionRunNotFoundError extends Error {}
 export class ConversationInputError extends Error {}
+export class ActiveAIExecutionRunConflictError extends Error {}
+export class IdempotencyConflictError extends Error {}
 
 function newConversationId(): ConversationId {
   return conversationId(`conversation:yara:${randomUUID()}`);
@@ -60,10 +64,23 @@ function normalizeMessageContent(value: string): string {
   return content;
 }
 
-function boundedDisplayText(value: string, maximum: number): string {
-  const normalized = value.replace(/\s+/gu, ' ').trim();
-  if (normalized.length <= maximum) return normalized;
-  return `${normalized.slice(0, maximum - 1).trimEnd()}…`;
+function normalizeIdempotencyKey(value: string): string {
+  if (typeof value !== 'string') throw new ConversationInputError('Idempotency key is required.');
+  const key = value.trim();
+  const containsControlCharacter = [...key].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint <= 31 || codePoint === 127);
+  });
+  if (key.length < 8 || key.length > 200 || containsControlCharacter) {
+    throw new ConversationInputError('Idempotency key must be between 8 and 200 safe characters.');
+  }
+  return key;
+}
+
+function semanticFingerprint(scope: string, values: readonly string[]): string {
+  return createHash('sha256')
+    .update(JSON.stringify([scope, ...values]))
+    .digest('hex');
 }
 
 function parseConversationId(value: string): ConversationId {
@@ -131,28 +148,52 @@ export class ConversationApplicationService {
     return conversation;
   }
 
+  public async getView(ownerRef: string, rawConversationId: string): Promise<YaraConversationView> {
+    const view = await this.persistence.getConversationViewForOwner(
+      ownerRef,
+      parseConversationId(rawConversationId),
+    );
+    if (!view) throw new ConversationNotFoundError('Conversation was not found.');
+    return view;
+  }
+
   public async list(ownerRef: string, limit = 20): Promise<readonly YaraConversationSummaryView[]> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
       throw new ConversationInputError('Conversation history limit must be between 1 and 50.');
     }
-    const conversations = await this.persistence.listMeaningfulConversationsForOwner(
+    return this.persistence.listConversationSummariesForOwner(ownerRef, limit);
+  }
+
+  public async start(
+    ownerRef: string,
+    rawContent: string,
+    rawIdempotencyKey: string,
+  ): Promise<ConversationCommandReceipt> {
+    const content = normalizeMessageContent(rawContent);
+    const idempotencyKey = normalizeIdempotencyKey(rawIdempotencyKey);
+    const createdAt = this.now();
+    const id = newConversationId();
+    const userMessageId = newMessageId();
+    const runId = newRunId();
+    const conversation = createYaraConversation({ id, createdAt });
+    const run = createAIExecutionRun({
+      id: runId,
+      conversationId: id,
+      triggerMessageId: userMessageId,
+      status: 'pending',
+      provider: this.provider.provider,
+      model: this.provider.model,
+      createdAt,
+    });
+    return this.persistence.startConversationWithMessage({
       ownerRef,
-      limit,
-    );
-    return conversations.flatMap((conversation) => {
-      const firstUserMessage = conversation.messages.find((message) => message.role === 'user');
-      const lastMessage = conversation.messages.at(-1);
-      if (!firstUserMessage || !lastMessage) return [];
-      return [
-        {
-          id: conversation.id,
-          updatedAt: conversation.updatedAt,
-          title: boundedDisplayText(firstUserMessage.content, 88),
-          preview: boundedDisplayText(lastMessage.content, 140),
-          messageCount: conversation.messages.length,
-          lastMessageRole: lastMessage.role,
-        },
-      ];
+      idempotencyKey,
+      semanticFingerprint: semanticFingerprint('start_conversation', [ownerRef, content]),
+      conversation,
+      messageId: userMessageId,
+      content,
+      createdAt,
+      run,
     });
   }
 
@@ -160,6 +201,7 @@ export class ConversationApplicationService {
     ownerRef: string,
     rawConversationId: string,
     rawContent: string,
+    rawIdempotencyKey: string,
   ): Promise<{
     readonly conversationId: ConversationId;
     readonly messageId: MessageId;
@@ -167,6 +209,7 @@ export class ConversationApplicationService {
   }> {
     const id = parseConversationId(rawConversationId);
     const content = normalizeMessageContent(rawContent);
+    const idempotencyKey = normalizeIdempotencyKey(rawIdempotencyKey);
     const createdAt = this.now();
     const userMessageId = newMessageId();
     const runId = newRunId();
@@ -180,20 +223,16 @@ export class ConversationApplicationService {
       createdAt,
     });
 
-    try {
-      await this.persistence.acceptUserMessageAndRun({
-        ownerRef,
-        messageId: userMessageId,
-        conversationId: id,
-        content,
-        createdAt,
-        run,
-      });
-    } catch (error) {
-      if (error instanceof ConversationNotFoundError) throw error;
-      throw error;
-    }
-    return { conversationId: id, messageId: userMessageId, runId };
+    return this.persistence.acceptUserMessageAndRun({
+      ownerRef,
+      idempotencyKey,
+      semanticFingerprint: semanticFingerprint('send_message', [ownerRef, id, content]),
+      messageId: userMessageId,
+      conversationId: id,
+      content,
+      createdAt,
+      run,
+    });
   }
 
   public async getRun(ownerRef: string, rawRunId: string): Promise<AIExecutionRunView> {
