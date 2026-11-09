@@ -229,6 +229,38 @@
         ]
       }
     },
+    "/conversations/start": {
+      "post": {
+        "operationId": "YaraController_startConversation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartConversationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendConversationMessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Atomically start a conversation with durable AI execution intent",
+        "tags": [
+          "yara"
+        ]
+      }
+    },
     "/conversations": {
       "post": {
         "operationId": "YaraController_createConversation",
@@ -787,6 +819,45 @@
           "albumContexts"
         ]
       },
+      "StartConversationDto": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "example": "Why does this song feel so spacious?"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "content",
+          "idempotencyKey"
+        ]
+      },
+      "SendConversationMessageResponseDto": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string"
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId",
+          "messageId",
+          "runId"
+        ]
+      },
       "ConversationMessageDto": {
         "type": "object",
         "properties": {
@@ -828,137 +899,6 @@
           "content",
           "status",
           "createdAt"
-        ]
-      },
-      "YaraConversationDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "active",
-              "archived"
-            ]
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "messages": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ConversationMessageDto"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "status",
-          "createdAt",
-          "updatedAt",
-          "messages"
-        ]
-      },
-      "CreateConversationResponseDto": {
-        "type": "object",
-        "properties": {
-          "conversation": {
-            "$ref": "#/components/schemas/YaraConversationDto"
-          }
-        },
-        "required": [
-          "conversation"
-        ]
-      },
-      "YaraConversationSummaryDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "title": {
-            "type": "string"
-          },
-          "preview": {
-            "type": "string"
-          },
-          "messageCount": {
-            "type": "number",
-            "minimum": 1
-          },
-          "lastMessageRole": {
-            "type": "string",
-            "enum": [
-              "user",
-              "assistant"
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "updatedAt",
-          "title",
-          "preview",
-          "messageCount",
-          "lastMessageRole"
-        ]
-      },
-      "ListConversationsResponseDto": {
-        "type": "object",
-        "properties": {
-          "conversations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/YaraConversationSummaryDto"
-            }
-          }
-        },
-        "required": [
-          "conversations"
-        ]
-      },
-      "SendConversationMessageDto": {
-        "type": "object",
-        "properties": {
-          "content": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4000,
-            "example": "Why does this song feel so spacious?"
-          }
-        },
-        "required": [
-          "content"
-        ]
-      },
-      "SendConversationMessageResponseDto": {
-        "type": "object",
-        "properties": {
-          "conversationId": {
-            "type": "string"
-          },
-          "messageId": {
-            "type": "string"
-          },
-          "runId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "conversationId",
-          "messageId",
-          "runId"
         ]
       },
       "AIExecutionFailureDto": {
@@ -1028,6 +968,137 @@
           "provider",
           "model",
           "createdAt"
+        ]
+      },
+      "YaraConversationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationMessageDto"
+            }
+          },
+          "activeRun": {
+            "$ref": "#/components/schemas/AIExecutionRunDto"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "messages"
+        ]
+      },
+      "CreateConversationResponseDto": {
+        "type": "object",
+        "properties": {
+          "conversation": {
+            "$ref": "#/components/schemas/YaraConversationDto"
+          }
+        },
+        "required": [
+          "conversation"
+        ]
+      },
+      "YaraConversationSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "title": {
+            "type": "string"
+          },
+          "preview": {
+            "type": "string"
+          },
+          "messageCount": {
+            "type": "number",
+            "minimum": 1
+          },
+          "lastMessageRole": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "activeRunId": {
+            "type": "string"
+          },
+          "activeRunStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "updatedAt",
+          "title",
+          "preview",
+          "messageCount",
+          "lastMessageRole"
+        ]
+      },
+      "ListConversationsResponseDto": {
+        "type": "object",
+        "properties": {
+          "conversations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/YaraConversationSummaryDto"
+            }
+          }
+        },
+        "required": [
+          "conversations"
+        ]
+      },
+      "SendConversationMessageDto": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "example": "Why does this song feel so spacious?"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "content",
+          "idempotencyKey"
         ]
       },
       "AIExecutionRunResponseDto": {

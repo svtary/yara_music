@@ -20,8 +20,10 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import {
+  ActiveAIExecutionRunConflictError,
   ConversationApplicationService,
   ConversationExecutionService,
+  IdempotencyConflictError,
 } from './conversation-service.js';
 import type {
   AIExecutionRunView,
@@ -34,6 +36,13 @@ class MemoryYaraPersistence implements YaraInteractionPersistencePort {
   public readonly conversations = new Map<string, { owner: string; value: YaraConversation }>();
   public readonly runs = new Map<string, AIExecutionRunView>();
   public readonly events = new Map<string, StoredYaraRunEvent[]>();
+  public readonly commands = new Map<
+    string,
+    {
+      fingerprint: string;
+      receipt: { conversationId: ConversationId; messageId: MessageId; runId: AIExecutionRunId };
+    }
+  >();
 
   public async createConversation(ownerRef: string, conversation: YaraConversation): Promise<void> {
     this.conversations.set(conversation.id, { owner: ownerRef, value: conversation });
@@ -51,28 +60,119 @@ class MemoryYaraPersistence implements YaraInteractionPersistencePort {
     return value?.owner === owner ? value.value : null;
   }
 
-  public async listMeaningfulConversationsForOwner(owner: string, limit: number) {
+  public async getConversationViewForOwner(owner: string, id: ConversationId) {
+    const conversation = await this.getConversationForOwner(owner, id);
+    if (!conversation) return null;
+    const activeRun = [...this.runs.values()].find(
+      ({ run }) =>
+        run.conversationId === id && (run.status === 'pending' || run.status === 'running'),
+    )?.run;
+    return { conversation, ...(activeRun ? { activeRun } : {}) };
+  }
+
+  public async listConversationSummariesForOwner(owner: string, limit: number) {
     return [...this.conversations.values()]
       .filter(
         (stored) =>
           stored.owner === owner &&
           stored.value.messages.some((message) => message.role === 'user'),
       )
-      .map((stored) => stored.value)
+      .map(({ value }) => {
+        const first = value.messages.find((message) => message.role === 'user')!;
+        const last = value.messages.at(-1)!;
+        const active = [...this.runs.values()].find(
+          ({ run }) =>
+            run.conversationId === value.id &&
+            (run.status === 'pending' || run.status === 'running'),
+        )?.run;
+        return {
+          id: value.id,
+          updatedAt: value.updatedAt,
+          title:
+            first.content.length > 88 ? `${first.content.slice(0, 87).trimEnd()}…` : first.content,
+          preview:
+            last.content.length > 140 ? `${last.content.slice(0, 139).trimEnd()}…` : last.content,
+          messageCount: value.messages.length,
+          lastMessageRole: last.role,
+          ...(active
+            ? { activeRunId: active.id, activeRunStatus: active.status as 'pending' | 'running' }
+            : {}),
+        };
+      })
       .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
       .slice(0, limit);
   }
 
+  public async startConversationWithMessage(input: {
+    readonly ownerRef: string;
+    readonly idempotencyKey: string;
+    readonly semanticFingerprint: string;
+    readonly conversation: YaraConversation;
+    readonly messageId: MessageId;
+    readonly content: string;
+    readonly createdAt: Date;
+    readonly run: AIExecutionRun;
+  }) {
+    const commandKey = `${input.ownerRef}:start:${input.idempotencyKey}`;
+    const existing = this.commands.get(commandKey);
+    if (existing) {
+      if (existing.fingerprint !== input.semanticFingerprint) {
+        throw new IdempotencyConflictError('different command');
+      }
+      return existing.receipt;
+    }
+    await this.createConversation(input.ownerRef, input.conversation);
+    const message = createConversationMessage({
+      id: input.messageId,
+      conversationId: input.conversation.id,
+      sequence: 1,
+      role: 'user',
+      content: input.content,
+      createdAt: input.createdAt,
+    });
+    this.conversations.get(input.conversation.id)!.value = appendCommittedMessage(
+      input.conversation,
+      message,
+    );
+    this.runs.set(input.run.id, { run: input.run });
+    const receipt = {
+      conversationId: input.conversation.id,
+      messageId: message.id,
+      runId: input.run.id,
+    };
+    this.commands.set(commandKey, { fingerprint: input.semanticFingerprint, receipt });
+    return receipt;
+  }
+
   public async acceptUserMessageAndRun(input: {
     readonly ownerRef: string;
+    readonly idempotencyKey: string;
+    readonly semanticFingerprint: string;
     readonly messageId: MessageId;
     readonly conversationId: ConversationId;
     readonly content: string;
     readonly createdAt: Date;
     readonly run: AIExecutionRun;
   }) {
+    const commandKey = `${input.ownerRef}:send:${input.idempotencyKey}`;
+    const existing = this.commands.get(commandKey);
+    if (existing) {
+      if (existing.fingerprint !== input.semanticFingerprint) {
+        throw new IdempotencyConflictError('different command');
+      }
+      return existing.receipt;
+    }
     const stored = this.conversations.get(input.conversationId);
     if (!stored || stored.owner !== input.ownerRef) throw new Error('not found');
+    if (
+      [...this.runs.values()].some(
+        ({ run }) =>
+          run.conversationId === input.conversationId &&
+          (run.status === 'pending' || run.status === 'running'),
+      )
+    ) {
+      throw new ActiveAIExecutionRunConflictError('active run');
+    }
     const message = createConversationMessage({
       id: input.messageId,
       conversationId: input.conversationId,
@@ -83,7 +183,13 @@ class MemoryYaraPersistence implements YaraInteractionPersistencePort {
     });
     stored.value = appendCommittedMessage(stored.value, message);
     this.runs.set(input.run.id, { run: input.run });
-    return { message, run: input.run };
+    const receipt = {
+      conversationId: input.conversationId,
+      messageId: message.id,
+      runId: input.run.id,
+    };
+    this.commands.set(commandKey, { fingerprint: input.semanticFingerprint, receipt });
+    return receipt;
   }
 
   public async getRun(id: AIExecutionRunId): Promise<AIExecutionRunView | null> {
@@ -220,10 +326,25 @@ describe('Stage 2 conversation orchestration', () => {
     );
     await application.create('owner:1');
     const first = await application.create('owner:1');
-    await application.send('owner:1', first.id, `A first question ${'with detail '.repeat(12)}`);
-    await application.send('owner:1', first.id, `A later message ${'with context '.repeat(16)}`);
+    const firstReceipt = await application.send(
+      'owner:1',
+      first.id,
+      `A first question ${'with detail '.repeat(12)}`,
+      'send:first-question',
+    );
+    await persistence.cancelRunForOwner(
+      'owner:1',
+      firstReceipt.runId,
+      new Date('2026-11-06T10:00:30.000Z'),
+    );
+    await application.send(
+      'owner:1',
+      first.id,
+      `A later message ${'with context '.repeat(16)}`,
+      'send:later-message',
+    );
     const otherOwner = await application.create('owner:2');
-    await application.send('owner:2', otherOwner.id, 'Private to another owner');
+    await application.send('owner:2', otherOwner.id, 'Private to another owner', 'send:private');
 
     const summaries = await application.list('owner:1', 20);
     expect(summaries).toHaveLength(1);
@@ -248,6 +369,45 @@ describe('Stage 2 conversation orchestration', () => {
     );
   });
 
+  it('atomically replays the same start command and rejects key reuse with different intent', async () => {
+    const persistence = new MemoryYaraPersistence();
+    const application = new ConversationApplicationService(
+      persistence,
+      { provider: 'test', model: 'test-model' },
+      clock(),
+    );
+    const first = await application.start(
+      'owner:1',
+      'Why does this feel open?',
+      'start:stable-key',
+    );
+    const replay = await application.start(
+      'owner:1',
+      'Why does this feel open?',
+      'start:stable-key',
+    );
+    expect(replay).toEqual(first);
+    expect(persistence.conversations.size).toBe(1);
+    expect(persistence.runs.size).toBe(1);
+    await expect(
+      application.start('owner:1', 'A materially different prompt', 'start:stable-key'),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+  });
+
+  it('rejects a second message while the conversation has an active run', async () => {
+    const persistence = new MemoryYaraPersistence();
+    const application = new ConversationApplicationService(
+      persistence,
+      { provider: 'test', model: 'test-model' },
+      clock(),
+    );
+    const conversation = await application.create('owner:1');
+    await application.send('owner:1', conversation.id, 'First', 'send:first-active');
+    await expect(
+      application.send('owner:1', conversation.id, 'Second', 'send:second-active'),
+    ).rejects.toBeInstanceOf(ActiveAIExecutionRunConflictError);
+  });
+
   it('commits an assistant message only after a successful provider completion', async () => {
     const persistence = new MemoryYaraPersistence();
     const application = new ConversationApplicationService(
@@ -256,7 +416,12 @@ describe('Stage 2 conversation orchestration', () => {
       clock(),
     );
     const conversation = await application.create('owner:1');
-    const receipt = await application.send('owner:1', conversation.id, 'Why does this feel open?');
+    const receipt = await application.send(
+      'owner:1',
+      conversation.id,
+      'Why does this feel open?',
+      'send:success',
+    );
     const runtime: AgentRuntimePort = {
       async *execute() {
         yield { type: 'text.delta', delta: 'Wide reverb' };
@@ -288,7 +453,7 @@ describe('Stage 2 conversation orchestration', () => {
       clock(),
     );
     const conversation = await application.create('owner:1');
-    const receipt = await application.send('owner:1', conversation.id, 'Hello?');
+    const receipt = await application.send('owner:1', conversation.id, 'Hello?', 'send:failure');
     const runtime: AgentRuntimePort = {
       async *execute() {
         yield* [];

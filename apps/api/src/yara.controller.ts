@@ -1,5 +1,6 @@
 import {
   Body,
+  ConflictException,
   Controller,
   Get,
   Headers,
@@ -25,14 +26,13 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import {
+  ActiveAIExecutionRunConflictError,
   AIExecutionRunNotFoundError,
   ConversationInputError,
   ConversationNotFoundError,
+  IdempotencyConflictError,
 } from '@yara/application';
-import type {
-  ConversationApplicationService,
-  ConversationExecutionService,
-} from '@yara/application';
+import type { ConversationApplicationService } from '@yara/application';
 import type { ApiConfig } from '@yara/config';
 import type {
   AIExecutionRunResponseContract,
@@ -42,16 +42,22 @@ import type {
 } from '@yara/contracts';
 import { Observable } from 'rxjs';
 
-import { API_CONFIG, CONVERSATION_APPLICATION, CONVERSATION_EXECUTION } from './tokens.js';
+import { API_CONFIG, CONVERSATION_APPLICATION } from './tokens.js';
 import {
   AIExecutionRunResponseDto,
   CreateConversationResponseDto,
   ListConversationsResponseDto,
   SendConversationMessageDto,
   SendConversationMessageResponseDto,
+  StartConversationDto,
   YaraConversationDto,
 } from './yara.dto.js';
-import { presentConversation, presentConversationSummary, presentRun } from './yara.presenter.js';
+import {
+  presentConversation,
+  presentConversationSummary,
+  presentConversationView,
+  presentRun,
+} from './yara.presenter.js';
 
 function cursor(value: string | undefined): number {
   if (value === undefined || value === '') return 0;
@@ -78,6 +84,12 @@ function translateError(error: unknown): never {
   if (error instanceof ConversationInputError) {
     throw new UnprocessableEntityException(error.message);
   }
+  if (
+    error instanceof ActiveAIExecutionRunConflictError ||
+    error instanceof IdempotencyConflictError
+  ) {
+    throw new ConflictException(error.message);
+  }
   throw error;
 }
 
@@ -88,9 +100,26 @@ export class YaraController {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(CONVERSATION_APPLICATION)
     private readonly conversations: ConversationApplicationService,
-    @Inject(CONVERSATION_EXECUTION)
-    private readonly execution: ConversationExecutionService,
   ) {}
+
+  @Post('conversations/start')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Atomically start a conversation with durable AI execution intent' })
+  @ApiAcceptedResponse({ type: SendConversationMessageResponseDto })
+  @ApiBody({ type: StartConversationDto })
+  public async startConversation(
+    @Body() body: StartConversationDto,
+  ): Promise<SendConversationMessageResponseContract> {
+    try {
+      return await this.conversations.start(
+        this.config.yaraActorRef,
+        body.content,
+        body.idempotencyKey,
+      );
+    } catch (error) {
+      return translateError(error);
+    }
+  }
 
   @Post('conversations')
   @ApiOperation({ summary: 'Create an owned Yara conversation' })
@@ -121,7 +150,9 @@ export class YaraController {
   @ApiNotFoundResponse()
   public async getConversation(@Param('id') id: string) {
     try {
-      return presentConversation(await this.conversations.get(this.config.yaraActorRef, id));
+      return presentConversationView(
+        await this.conversations.getView(this.config.yaraActorRef, id),
+      );
     } catch (error) {
       return translateError(error);
     }
@@ -137,13 +168,12 @@ export class YaraController {
     @Body() body: SendConversationMessageDto,
   ): Promise<SendConversationMessageResponseContract> {
     try {
-      const receipt = await this.conversations.send(this.config.yaraActorRef, id, body.content);
-      void this.execution.execute(receipt.runId).catch(() => {
-        console.error(
-          JSON.stringify({ event: 'ai.execution.dispatch_failed', runId: receipt.runId }),
-        );
-      });
-      return receipt;
+      return await this.conversations.send(
+        this.config.yaraActorRef,
+        id,
+        body.content,
+        body.idempotencyKey,
+      );
     } catch (error) {
       return translateError(error);
     }
@@ -168,7 +198,6 @@ export class YaraController {
   public async cancelRun(@Param('id') id: string): Promise<AIExecutionRunResponseContract> {
     try {
       const view = await this.conversations.cancel(this.config.yaraActorRef, id);
-      this.execution.abort(view.run.id);
       return presentRun(view);
     } catch (error) {
       return translateError(error);

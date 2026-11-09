@@ -1,4 +1,8 @@
-import type { AIExecutionRunView, YaraConversationSummaryView } from '@yara/application';
+import type {
+  AIExecutionRunView,
+  YaraConversationSummaryView,
+  YaraConversationView,
+} from '@yara/application';
 import type {
   AIExecutionRunContract,
   AIExecutionRunResponseContract,
@@ -31,6 +35,13 @@ export function presentConversation(conversation: YaraConversation): YaraConvers
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
     messages: conversation.messages.map(presentMessage),
+  };
+}
+
+export function presentConversationView(view: YaraConversationView): YaraConversationContract {
+  return {
+    ...presentConversation(view.conversation),
+    ...(view.activeRun ? { activeRun: presentRun({ run: view.activeRun }).run } : {}),
   };
 }
 

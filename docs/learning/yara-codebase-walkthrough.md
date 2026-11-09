@@ -73,7 +73,7 @@ Web 不直接操作 PostgreSQL，因为浏览器不能安全持有数据库凭�
 ├── apps/
 │   ├── web/                  # Next.js App Router Web/BFF
 │   ├── api/                  # NestJS + Fastify HTTP API
-│   ├── worker/               # 独立后台进程（当前仅 health skeleton）
+│   ├── worker/               # PostgreSQL durable AI job 执行者 + health
 │   └── catalog-cli/          # 受控 Provider ingestion / projection rebuild entry point
 ├── packages/
 │   ├── contracts/            # Health + Catalog + Conversation/Run transport contract / OpenAPI
@@ -104,12 +104,12 @@ Web 不直接操作 PostgreSQL，因为浏览器不能安全持有数据库凭�
 
 ### 2.1 Runtime Apps
 
-| App                | 进程与启动者                                                | 主要依赖                                                | 当前能做什么                                                | 不能做什么                                                       |
-| ------------------ | ----------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
-| `apps/web`         | `next dev` 或 standalone Node server；本机/pnpm/Docker 启动 | Next.js、React、AntD、TanStack Query、config、contracts | Explore/Detail 与 Ask Yara；通过 Route Handler 代理 API/SSE | 不直连 DB；不拥有 canonical mutation/final AuthZ                 |
-| `apps/api`         | Node 进程；Nest bootstrap，Fastify 处理 HTTP                | NestJS、Fastify、Swagger、Application、adapters         | health、Catalog、Conversation、AI Run/SSE/poll、OpenAPI     | Controller/BFF/AI Runtime 都不是 Domain authority                |
-| `apps/worker`      | 独立 Node HTTP 进程                                         | config、contracts、Postgres adapter                     | live/ready health                                           | 尚无 pg-boss/job；不能绕过 Application/owner boundary 写任意数据 |
-| `apps/catalog-cli` | 短生命周期 Node CLI                                         | Application、Provider/Postgres adapters、typed config   | 按 Provider ID 导入；显式 rebuild Search                    | 不是公开 HTTP ingestion endpoint；不提供产品 Search              |
+| App                | 进程与启动者                                                | 主要依赖                                                          | 当前能做什么                                                                       | 不能做什么                                                   |
+| ------------------ | ----------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `apps/web`         | `next dev` 或 standalone Node server；本机/pnpm/Docker 启动 | Next.js、React、AntD、TanStack Query、config、contracts           | Explore/Detail 与 Ask Yara；通过 Route Handler 代理 API/SSE                        | 不直连 DB；不拥有 canonical mutation/final AuthZ             |
+| `apps/api`         | Node 进程；Nest bootstrap，Fastify 处理 HTTP                | NestJS、Fastify、Swagger、Application、adapters                   | health、Catalog、Conversation、AI Run/SSE/poll、OpenAPI                            | Controller/BFF/AI Runtime 都不是 Domain authority            |
+| `apps/worker`      | 独立 Node HTTP 进程                                         | Application、AI Runtime、Model/Postgres adapters、pg-boss、config | pg-boss dispatch + claim/lease/heartbeat/recover durable AI job；live/ready health | 不拥有 Conversation canonical write；不盲重放 UnknownOutcome |
+| `apps/catalog-cli` | 短生命周期 Node CLI                                         | Application、Provider/Postgres adapters、typed config             | 按 Provider ID 导入；显式 rebuild Search                                           | 不是公开 HTTP ingestion endpoint；不提供产品 Search          |
 
 ### 2.2 Core Packages
 
@@ -230,9 +230,9 @@ ServiceStatusCard
 
 ## 6. `apps/worker`
 
-Worker 是独立 deployable，适合耗时、异步、可重试、无需占用 HTTP request 的工作。当前它没有 NestJS，也没有 pg-boss：`src/main.ts` 只创建一个 Node HTTP server，提供 `/health/live`、`/health/ready`，并用最多 2 个连接的 Kysely pool probe DB。
+Worker 是独立 deployable，适合耗时、异步、可恢复、无需占用 HTTP request 的工作。它没有 NestJS；`src/main.ts` 除 `/health/live`、`/health/ready` 外，还组合 `pg-boss → PostgresYaraInteractionAdapter → DurableAIExecutionWorker → ConversationExecutionService → AgentRuntimePort → ModelProviderPort`。Owner transaction 先写 `yara_interaction.ai_execution_jobs` durable outbox intent；pg-boss 的独立 `yara_jobs` schema 负责调度 Worker drain，Worker 再 claim intent、维护 lease/heartbeat，并在启动时恢复 stale job。
 
-未来 `embedding/index rebuild job` 可能由 pg-boss 领取任务，读取 owner 授权的数据，计算 projection，再通过相应 Application/owner-authorized path 提交结果。**该 job 当前未实现。** 即使是 Worker，也不能直接修改任意 Domain 数据；进程位置不会改变 ownership。
+`pending` run 的 stale claim 可重新排队；已进入 `running` 且 provider outcome 未知时不会盲目再次调用 provider，而是进入 reconciliation-required 并安全终止当前 run。即使是 Worker，也只能经 Application orchestration 与 owner-authorized persistence path 提交 Conversation/Run 结果；进程位置不会改变 ownership。
 
 把所有 cron 写在 API 中会耦合 Web traffic 与 background workload：API restart/scale-out 可能重复执行，长任务抢占请求资源，任务生命周期也难以独立观测与恢复。
 
@@ -357,8 +357,8 @@ Yara ArtistRef / AlbumRef / RecordingRef
 `packages/adapters-postgres/src/index.ts`：
 
 - `createPostgresDatabase()` 创建 `pg.Pool`（默认最多 10 connections）和 Kysely instance。
-- Kysely 是 type-safe SQL/query builder，不是 Domain model；`YaraDatabase` 目前只声明 Catalog-owned tables，row types 保持在 adapter 内部。
-- `migrateYaraDatabase()` 依次执行 extension、Catalog foundation/metadata 与 `0004_catalog_search_projection`；Search schema 是可重建 projection，不是 Catalog truth。
+- Kysely 是 type-safe SQL/query builder，不是 Domain model；`YaraDatabase` 声明 Catalog、Search projection 与 Yara Interaction 的 adapter-local row types，不把任何 row type 当作 Domain entity。
+- `migrateYaraDatabase()` 依次执行 `0001` extension、Catalog foundation/metadata、`0004_catalog_search_projection`、`0005_yara_interaction_foundation` 与 `0006_yara_interaction_reliability`；Search schema 是可重建 projection，不是 Catalog truth，Conversation/Run/job/idempotency tables 则属于 `yara_interaction` owner schema。
 - `probePostgres()` 查询 PostgreSQL server version 与已安装 extension。
 - `migrate.ts` 是可执行 migration entry，读取 config、迁移、打印结果、destroy pool。
 
@@ -467,7 +467,7 @@ Liveness 与 readiness 不同：
 - Architecture script：合法 TS 但不合法 architecture 的 import。
 - Docker/runtime：DNS、端口、镜像构建、DB extension、真实连接与启动顺序；编译器无法发现。
 
-PostgreSQL integration tests 会创建隔离数据库，验证 0002→0004/fresh migration、fixtures、provider mapping、write rollback/idempotency、projection rebuild、Search ranking 和 Detail read models。当前仍没有正式 browser E2E。
+PostgreSQL integration tests 会创建隔离数据库，验证 0002→0006/fresh migration、fixtures、provider mapping、write rollback/idempotency、projection rebuild、Search ranking、Detail read models，以及 Conversation/AI run/event/job 的 owner read、active-run 唯一性、lease recovery 与事务边界。当前仍没有正式 browser E2E。
 
 ## 17. `check-architecture.mjs`
 
@@ -524,24 +524,26 @@ Postgres migration
 API/Web smoke
 ```
 
-当前目录是 Git repository，工作分支为 `feat/musicbrainz-catalog-adapter`，并配置了 `origin`。本地存在/更新 workflow 不等于 GitHub Actions 已运行；只有 push 或 pull request 触发匹配事件后，远端 runner 才会执行并留下独立证据。
+当前目录是 Git repository，工作分支为 `feat/stage-2-conversation`，并配置了 `origin`。本地存在/更新 workflow 不等于 GitHub Actions 已运行；只有 push 或 pull request 触发匹配事件后，远端 runner 才会执行并留下独立证据。
 
 ## 20. OpenAPI
 
 OpenAPI 是 HTTP API 的 machine-readable 描述：路径、method、status、schema。Nest 的 Swagger decorators 和 application metadata 经 `generate-openapi.ts` 产生 `packages/contracts/openapi/yara.openapi.json`。
 
-当前 artifact 还包含 Conversation create/read/send、AI Run poll/cancel 与 SSE endpoint；Web 通过显式 transport types 与 Next BFF 消费这些 endpoints，且不会直接暴露 DB row、provider SDK type 或 raw provider failure。
+当前 artifact 还包含 atomic Conversation start、Conversation read/send、AI Run poll/cancel 与 SSE endpoint；Web 通过显式 transport types 与 Next BFF 消费这些 endpoints，且不会直接暴露 DB row、provider SDK type 或 raw provider failure。
 
 生成文件不必逐行读：优先检查 endpoint/schema/status 的语义 diff，以及它是否与 source controller/DTO 改动一致。
 
 ## 21. AI Runtime 与 Conversation
 
-`domain-yara-interaction` 拥有 `YaraConversation` 和 committed message；`ai-runtime` 拥有非权威 execution mechanics 与独立 `AIExecutionRun`。Application 先提交 user message 和 pending run，再调用 `AgentRuntimePort → ModelProviderPort`；只有 provider 正常完成后才由 Yara Interaction owner 事务性提交 assistant message。Partial delta 只进入 replayable run-event log，不是 durable Conversation message。
+`domain-yara-interaction` 拥有 `YaraConversation` 和 committed message；`ai-runtime` 拥有非权威 execution mechanics 与独立 `AIExecutionRun`。Application 的 start command 在一个 owner transaction 内提交 Conversation、首条 user message、pending run、durable job 和语义绑定的 idempotency receipt。API 不执行后台模型调用；独立 Worker claim durable job 后调用 `ConversationExecutionService → AgentRuntimePort → ModelProviderPort`。只有 provider 正常完成后，Yara Interaction owner 才事务性提交 assistant message。Partial delta 只进入 replayable run-event log，不是 durable Conversation message。
 
 `AgentRuntimePort != ModelProviderPort`：当前前者只是受控 pass-through，并未引入 planning、tools 或 agent autonomy。`adapters-openai` 把 Responses API event 转为 Yara event，并屏蔽 SDK types/raw failure。bounded recent context 只服务本次执行，`Context Compaction != Memory creation`。
 
 ```text
-POST committed user message + pending AIExecutionRun
+POST atomic start/send command
+  ↓ owner transaction: Conversation/message + pending run + durable job + idempotency receipt
+Worker claim + lease/heartbeat
   ↓ Application execution orchestration
 bounded recent Conversation context
   ↓ AgentRuntimePort（Stage 2 pass-through）
@@ -551,6 +553,8 @@ SSE with sequence ID / Last-Event-ID replay
   ├─ success → committed assistant message + completed run
   └─ failure/cancel → terminal run only; no fake assistant message
 ```
+
+每个 Conversation 在数据库与 Application 两层都最多只有一个 `pending | running` run。Conversation read model 暴露 active run，因而 Continue、History 与 refresh 会恢复 SSE/poll，而不是错误显示 Ready。相同 `IdempotencyKey + semantic fingerprint` 返回原 receipt；同 key 不同 intent 冲突。
 
 Stage 2 仍没有 RAG/Retrieval、citations、typed Tool Calling、StructuredResult commit、Recommendation、Taste 或 Memory；这些不能从 Conversation 代码旁路提前加入。
 

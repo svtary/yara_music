@@ -109,6 +109,7 @@ export interface YaraConversationContract {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly messages: readonly ConversationMessageContract[];
+  readonly activeRun?: AIExecutionRunContract;
 }
 
 export type AIExecutionRunStatusContract =
@@ -138,6 +139,8 @@ export interface YaraConversationSummaryContract {
   readonly preview: string;
   readonly messageCount: number;
   readonly lastMessageRole: ConversationMessageRoleContract;
+  readonly activeRunId?: string;
+  readonly activeRunStatus?: 'pending' | 'running';
 }
 
 export interface ListConversationsResponseContract {
@@ -146,7 +149,10 @@ export interface ListConversationsResponseContract {
 
 export interface SendConversationMessageRequestContract {
   readonly content: string;
+  readonly idempotencyKey: string;
 }
+
+export type StartConversationRequestContract = SendConversationMessageRequestContract;
 
 export interface SendConversationMessageResponseContract {
   readonly conversationId: string;

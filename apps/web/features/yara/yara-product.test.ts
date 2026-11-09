@@ -1,10 +1,11 @@
-import type { YaraConversationContract, YaraConversationSummaryContract } from '@yara/contracts';
+import type { YaraConversationSummaryContract } from '@yara/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import { startConversationFromPrompt } from './start-conversation';
 import {
   conversationDateLabel,
   meaningfulRecentConversation,
+  resolveResumableRunId,
   resolveYaraSurface,
   yaraConversationHref,
 } from './yara-routes';
@@ -19,14 +20,13 @@ describe('Yara product routing', () => {
   });
 
   it('starts exactly one conversation and one run from an explicit prompt', async () => {
-    const create = vi.fn().mockResolvedValue({ id: conversationId } as YaraConversationContract);
-    const send = vi.fn().mockResolvedValue({ runId });
+    const start = vi.fn().mockResolvedValue({ conversationId, runId });
 
     await expect(
-      startConversationFromPrompt('  What makes this feel open?  ', { create, send }),
+      startConversationFromPrompt('  What makes this feel open?  ', 'start:test-key', { start }),
     ).resolves.toBe(yaraConversationHref(conversationId, runId));
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith(conversationId, 'What makes this feel open?');
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith('What makes this feel open?', 'start:test-key');
   });
 
   it('uses the bounded server ordering for Continue and stable history labels', () => {
@@ -43,6 +43,29 @@ describe('Yara product routing', () => {
     );
     expect(conversationDateLabel(summaries[1]!.updatedAt, new Date('2026-11-08T12:00:00Z'))).toBe(
       'YESTERDAY',
+    );
+  });
+
+  it('restores an authoritative active run after Continue, History, or refresh', () => {
+    const conversation = {
+      id: conversationId,
+      status: 'active',
+      createdAt: '2026-11-09T10:00:00.000Z',
+      updatedAt: '2026-11-09T10:00:00.000Z',
+      messages: [],
+      activeRun: {
+        id: runId,
+        conversationId,
+        triggerMessageId: 'message:yara:33333333-3333-4333-8333-333333333333',
+        status: 'running',
+        provider: 'test',
+        model: 'test-model',
+        createdAt: '2026-11-09T10:00:00.000Z',
+      },
+    } as const;
+    expect(resolveResumableRunId(null, conversation)).toBe(runId);
+    expect(resolveResumableRunId('ai-run:yara:route-run', conversation)).toBe(
+      'ai-run:yara:route-run',
     );
   });
 });

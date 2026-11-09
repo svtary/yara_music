@@ -133,6 +133,7 @@ describePostgres('PostgreSQL Catalog persistence', () => {
       '0003_catalog_album_metadata',
       '0004_catalog_search_projection',
       '0005_yara_interaction_foundation',
+      '0006_yara_interaction_reliability',
     ]);
 
     await seedCatalogFixtures(database);

@@ -131,6 +131,31 @@ export interface YaraAIExecutionRunEventTable {
   created_at: Date;
 }
 
+export type YaraExecutionJobStatus =
+  'queued' | 'claimed' | 'completed' | 'failed' | 'cancelled' | 'reconciliation_required';
+
+export interface YaraAIExecutionJobTable {
+  run_id: string;
+  status: YaraExecutionJobStatus;
+  attempt: number;
+  lease_owner: string | null;
+  lease_expires_at: Date | null;
+  last_error: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface YaraCommandIdempotencyTable {
+  owner_ref: string;
+  command_scope: 'start_conversation' | 'send_message';
+  idempotency_key: string;
+  semantic_fingerprint: string;
+  conversation_id: string;
+  message_id: string;
+  run_id: string;
+  created_at: Date;
+}
+
 /** Kysely row types remain adapter-local and never become Domain entities. */
 export interface YaraDatabase {
   'catalog.artists': CatalogArtistTable;
@@ -146,4 +171,6 @@ export interface YaraDatabase {
   'yara_interaction.conversation_messages': YaraConversationMessageTable;
   'yara_interaction.ai_execution_runs': YaraAIExecutionRunTable;
   'yara_interaction.ai_execution_run_events': YaraAIExecutionRunEventTable;
+  'yara_interaction.ai_execution_jobs': YaraAIExecutionJobTable;
+  'yara_interaction.command_idempotency': YaraCommandIdempotencyTable;
 }

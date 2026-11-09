@@ -10,8 +10,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@yara/adapters-openai": "workspace:*",
     "@yara/adapters-postgres": "workspace:*",
+    "@yara/ai-runtime": "workspace:*",
+    "@yara/application": "workspace:*",
     "@yara/config": "workspace:*",
-    "@yara/contracts": "workspace:*"
+    "@yara/contracts": "workspace:*",
+    "pg-boss": "catalog:"
   }
 }
